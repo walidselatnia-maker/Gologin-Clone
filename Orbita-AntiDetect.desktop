@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Orbita Anti-Detect
+Comment=Anti-Detect Multi-Accounting Browser Profile Manager
+Exec=/home/abkoor/Documents/GitHub/Gologin-Clone/START_APP.sh
+Path=/home/abkoor/Documents/GitHub/Gologin-Clone
+Icon=/home/abkoor/Documents/GitHub/Gologin-Clone/orbita_clone/public/icon.png
+Terminal=false
+Categories=Network;WebBrowser;Development;
+StartupNotify=true

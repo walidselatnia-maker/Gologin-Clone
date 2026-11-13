@@ -17,15 +17,67 @@ app.use(express.json());
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const DATA_DIR = path.join(__dirname, 'data');
+// Persistent User Data Directory (Stored in OS user config outside git repository to prevent data loss)
+function resolveAppDataDir() {
+  const userHome = process.env.HOME || process.env.USERPROFILE || '';
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(userHome, 'AppData', 'Roaming'), 'orbita-anti-detect');
+  } else if (process.platform === 'darwin') {
+    return path.join(userHome, 'Library', 'Application Support', 'orbita-anti-detect');
+  } else {
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(userHome, '.config'), 'orbita-anti-detect');
+  }
+}
+
+const APPDATA_DIR = resolveAppDataDir();
+const DATA_DIR = path.join(APPDATA_DIR, 'data');
 const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
 const PROFILES_DIR = path.join(DATA_DIR, 'profiles_data');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(PROFILES_DIR)) fs.mkdirSync(PROFILES_DIR, { recursive: true });
-if (!fs.existsSync(PROFILES_FILE)) {
-  fs.writeFileSync(PROFILES_FILE, JSON.stringify([], null, 2));
+
+// Auto-migration & recovery: If persistent storage is empty, check legacy local folders and recover
+function autoRecoverLegacyData() {
+  let currentProfiles = [];
+  try {
+    if (fs.existsSync(PROFILES_FILE)) {
+      currentProfiles = JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf8'));
+    }
+  } catch (e) {}
+
+  if (!Array.isArray(currentProfiles) || currentProfiles.length === 0) {
+    const candidateLegacyDirs = [
+      path.join(__dirname, 'data'),
+      '/home/abkoor/Documents/GitHub/Gologin-Clone-1/orbita_clone/data',
+      '/home/abkoor/Documents/GitHub/Gologin-Clone/orbita_clone/data'
+    ];
+
+    for (const legDir of candidateLegacyDirs) {
+      const legFile = path.join(legDir, 'profiles.json');
+      const legProfData = path.join(legDir, 'profiles_data');
+      if (fs.existsSync(legFile)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(legFile, 'utf8'));
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`[Data Protection] Recovered ${parsed.length} profiles from legacy storage: ${legDir}`);
+            fs.writeFileSync(PROFILES_FILE, JSON.stringify(parsed, null, 2), 'utf8');
+            if (fs.existsSync(legProfData)) {
+              try { fs.cpSync(legProfData, PROFILES_DIR, { recursive: true }); } catch (e) {}
+            }
+            break;
+          }
+        } catch (err) {}
+      }
+    }
+  }
+
+  if (!fs.existsSync(PROFILES_FILE)) {
+    fs.writeFileSync(PROFILES_FILE, JSON.stringify([], null, 2));
+  }
 }
+
+autoRecoverLegacyData();
 
 // Running browser processes map: profileId -> { proc, startTime, anonymizedUrl }
 const RUNNING_PROCESSES = new Map();
