@@ -1874,6 +1874,32 @@ function setupEventListeners() {
       }
     });
   }
+
+  // Global Keyboard Shortcuts (Ctrl+K or "/" to search, Esc to close modals)
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      const search = document.getElementById('search-input');
+      if (search) {
+        search.focus();
+        search.select();
+      }
+    } else if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      e.preventDefault();
+      const search = document.getElementById('search-input');
+      if (search) {
+        search.focus();
+        search.select();
+      }
+    } else if (e.key === 'Escape') {
+      const activeModal = document.querySelector('.modal-backdrop.active, .modal-backdrop.show');
+      if (activeModal) {
+        closeModal(activeModal.id);
+      } else if (document.activeElement === document.getElementById('search-input')) {
+        document.getElementById('search-input').blur();
+      }
+    }
+  });
 }
 
 // -------------------------------------------------------------
@@ -2330,7 +2356,7 @@ function renderCloudProfilesTable() {
   }
 
   tbody.innerHTML = currentList.map(p => {
-    const isRunning = runningProfiles.has(p.id);
+    const isRunning = Boolean(p.isRunning);
     const proxyDesc = (p.proxy && p.proxy.mode !== 'none' && p.proxy.host) 
       ? `${p.proxy.mode.toUpperCase()} (${p.proxy.host}:${p.proxy.port})` 
       : '<span class="text-muted">Direct</span>';

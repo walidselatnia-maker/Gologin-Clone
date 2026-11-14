@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Orbita Anti-Detect Browser Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -107,6 +110,7 @@
           <div class="topbar-search-wrap">
             <i class="fa-solid fa-magnifying-glass search-icon"></i>
             <input type="text" id="search-input" placeholder="Search profiles by name, tags, proxy IP, or notes...">
+            <span class="search-kbd-badge" id="search-kbd-hint">Ctrl K</span>
             <button class="clear-search-btn" id="clear-search-btn" style="display: none;">&times;</button>
           </div>
         </div>
@@ -116,7 +120,7 @@
             <i class="fa-solid fa-cloud-arrow-down"></i> Updates Available (<span id="updates-count-badge">0</span>)
           </button>
           <button class="btn btn-outline" id="btn-open-gologin-import" onclick="openGoLoginImportModal()">
-            <i class="fa-solid fa-file-import text-green"></i> Import GoLogin (<span id="gologin-detected-badge">0</span>)
+            <i class="fa-solid fa-file-import text-green"></i> Import GoLogin <span class="badge" id="gologin-detected-badge" style="background: var(--brand-primary-soft); color: var(--brand-primary); font-weight: 700; margin-left: 4px; padding: 2px 7px; border-radius: var(--radius-pill);">0</span>
           </button>
           <button class="btn btn-secondary" id="btn-open-bulk-modal">
             <i class="fa-solid fa-layer-group"></i> Bulk Add
