@@ -2048,5 +2048,140 @@ textarea.form-input {
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
 .py-8 { padding-top: 32px; padding-bottom: 32px; }
+
+/* ==========================================================================
+   GOLOGIN-STYLE COLUMN & SECTION CUSTOMIZER POPOVER
+   ========================================================================== */
+.custom-columns-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.custom-columns-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  max-height: 480px;
+  overflow-y: auto;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 120;
+  padding: 8px 0;
+  user-select: none;
+  animation: popoverDrop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popoverDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.col-customizer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.col-customizer-header-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.col-customizer-reset-btn {
+  font-size: 11px;
+  color: var(--brand-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-weight: 600;
+}
+
+.col-customizer-reset-btn:hover {
+  text-decoration: underline;
+}
+
+.col-customizer-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 14px 4px 14px;
+}
+
+.col-customizer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.col-customizer-item:hover {
+  background-color: var(--bg-surface-elevated);
+  color: var(--text-main);
+}
+
+.col-customizer-item.active {
+  color: var(--text-main);
+}
+
+.col-customizer-item .eye-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  transition: all var(--transition-fast);
+}
+
+.col-customizer-item .eye-toggle-btn i {
+  font-size: 13.5px;
+  transition: all var(--transition-fast);
+}
+
+.col-customizer-item.active .eye-toggle-btn i {
+  color: var(--brand-primary);
+}
+
+.col-customizer-item:not(.active) .eye-toggle-btn i {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.col-customizer-item:hover .eye-toggle-btn {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.col-customizer-divider {
+  height: 1px;
+  background-color: var(--border-subtle);
+  margin: 6px 0;
+}
 .py-12 { padding-top: 48px; padding-bottom: 48px; }
 .cursor-pointer { cursor: pointer; }

@@ -110,9 +110,11 @@ const DEFAULT_COLUMN_WIDTHS = {
   action: 105,
   profile: 240,
   tags: 130,
+  notes: 160,
   proxy: 175,
   engine: 115,
   'last-active': 110,
+  created: 115,
   manage: 140
 };
 
@@ -120,9 +122,11 @@ const MIN_COLUMN_WIDTHS = {
   action: 80,
   profile: 140,
   tags: 80,
+  notes: 90,
   proxy: 110,
   engine: 85,
   'last-active': 80,
+  created: 85,
   manage: 100
 };
 
@@ -217,6 +221,181 @@ function initResizableColumns() {
 }
 
 // -------------------------------------------------------------
+// GOLOGIN-STYLE COLUMN & SECTION VISIBILITY CUSTOMIZER
+// -------------------------------------------------------------
+const COLUMN_SECTIONS_CONFIG = [
+  {
+    category: 'Proxies',
+    columns: [
+      { id: 'proxy', label: 'Proxy & Latency', default: true }
+    ]
+  },
+  {
+    category: 'Profile Notes',
+    columns: [
+      { id: 'tags', label: 'Tags', default: true },
+      { id: 'notes', label: 'Notes', default: false }
+    ]
+  },
+  {
+    category: 'Profile Info',
+    columns: [
+      { id: 'action', label: 'Action Button', default: true },
+      { id: 'engine', label: 'Browser Engine', default: true },
+      { id: 'manage', label: 'Manage Actions', default: true }
+    ]
+  },
+  {
+    category: 'Date & Time',
+    columns: [
+      { id: 'last-active', label: 'Last Active', default: true },
+      { id: 'created', label: 'Created Date', default: false }
+    ]
+  }
+];
+
+function getDefaultColumnVisibility() {
+  const vis = {};
+  for (const sec of COLUMN_SECTIONS_CONFIG) {
+    for (const col of sec.columns) {
+      vis[col.id] = col.default;
+    }
+  }
+  return vis;
+}
+
+function getColumnVisibility() {
+  try {
+    const raw = localStorage.getItem('orbita_visible_columns');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...getDefaultColumnVisibility(), ...parsed };
+    }
+  } catch (e) {}
+  return getDefaultColumnVisibility();
+}
+
+function saveColumnVisibility(vis) {
+  try {
+    localStorage.setItem('orbita_visible_columns', JSON.stringify(vis));
+  } catch (e) {}
+}
+
+function applyColumnVisibility(vis) {
+  let styleEl = document.getElementById('dynamic-column-visibility-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamic-column-visibility-style';
+    document.head.appendChild(styleEl);
+  }
+
+  const hiddenSelectors = [];
+  for (const [colId, isVisible] of Object.entries(vis)) {
+    if (!isVisible) {
+      hiddenSelectors.push(`[data-col="${colId}"]`);
+    }
+  }
+
+  if (hiddenSelectors.length > 0) {
+    styleEl.textContent = `${hiddenSelectors.join(', ')} { display: none !important; }`;
+  } else {
+    styleEl.textContent = '';
+  }
+}
+
+function toggleColumnCustomizer(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const popover = document.getElementById('custom-columns-popover');
+  if (!popover) return;
+
+  const isHidden = popover.classList.contains('hidden');
+  if (isHidden) {
+    renderColumnCustomizer();
+    popover.classList.remove('hidden');
+  } else {
+    popover.classList.add('hidden');
+  }
+}
+
+function renderColumnCustomizer() {
+  const popover = document.getElementById('custom-columns-popover');
+  if (!popover) return;
+
+  const currentVis = getColumnVisibility();
+
+  let html = `
+    <div class="col-customizer-header">
+      <span class="col-customizer-header-title">
+        <i class="fa-solid fa-table-columns text-green"></i> Columns
+      </span>
+      <button class="col-customizer-reset-btn" onclick="resetColumnVisibility(event)">Reset</button>
+    </div>
+  `;
+
+  COLUMN_SECTIONS_CONFIG.forEach((sec, idx) => {
+    if (idx > 0) {
+      html += `<div class="col-customizer-divider"></div>`;
+    }
+    html += `<div class="col-customizer-section-title">${escapeHtml(sec.category)}</div>`;
+
+    sec.columns.forEach(col => {
+      const isVisible = currentVis[col.id] !== false;
+      const eyeIcon = isVisible ? 'fa-eye' : 'fa-eye-slash';
+
+      html += `
+        <div class="col-customizer-item ${isVisible ? 'active' : ''}" onclick="toggleColumnVisibility('${col.id}', event)">
+          <span>${escapeHtml(col.label)}</span>
+          <button class="eye-toggle-btn" title="${isVisible ? 'Hide section' : 'Show section'}" tabindex="-1">
+            <i class="fa-solid ${eyeIcon}"></i>
+          </button>
+        </div>
+      `;
+    });
+  });
+
+  popover.innerHTML = html;
+}
+
+function toggleColumnVisibility(colId, e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const currentVis = getColumnVisibility();
+  currentVis[colId] = !currentVis[colId];
+  saveColumnVisibility(currentVis);
+  applyColumnVisibility(currentVis);
+  renderColumnCustomizer();
+
+  const label = findColumnLabel(colId);
+  const actionText = currentVis[colId] ? 'shown' : 'hidden';
+  showToast(`Section "${label}" ${actionText}`, 'info', 1600);
+}
+
+function resetColumnVisibility(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const defaultVis = getDefaultColumnVisibility();
+  saveColumnVisibility(defaultVis);
+  applyColumnVisibility(defaultVis);
+  renderColumnCustomizer();
+  showToast('Columns reset to default view', 'info', 1800);
+}
+
+function findColumnLabel(colId) {
+  for (const sec of COLUMN_SECTIONS_CONFIG) {
+    const found = sec.columns.find(c => c.id === colId);
+    if (found) return found.label;
+  }
+  return colId;
+}
+
+// -------------------------------------------------------------
 // INITIALIZATION
 // -------------------------------------------------------------
 async function init() {
@@ -225,6 +404,7 @@ async function init() {
   setupModalDismissals();
   setupFolderColorPicker();
   setupEventListeners();
+  applyColumnVisibility(getColumnVisibility());
   initResizableColumns();
   
   await loadSystemInfo();
@@ -784,30 +964,39 @@ function renderProfilesTable() {
         <td class="text-center col-checkbox">
           <input type="checkbox" class="profile-row-checkbox" data-id="${escapeHtml(p.id)}" ${isSelected ? 'checked' : ''}>
         </td>
-        <td class="col-quick-action">
+        <td class="col-quick-action" data-col="action">
           ${actionBtnHtml}
         </td>
-        <td class="col-profile">
+        <td class="col-profile" data-col="profile">
           <div class="profile-cell-wrap">
             <div class="profile-title-row">
               <i class="fa-brands ${osIcon} text-muted" title="${escapeHtml(fp.os || 'Windows')}"></i>
               <strong class="profile-main-name" onclick="openEditModal('${escapeHtml(p.id)}')">${escapeHtml(p.name)}</strong>
               ${folderBadgeHtml}
             </div>
-            ${p.notes ? `<div class="text-xs text-muted" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;"><i class="fa-regular fa-note-sticky"></i> ${escapeHtml(p.notes)}</div>` : ''}
           </div>
         </td>
-        <td class="col-tags">${tagsHtml}</td>
-        <td class="col-proxy">${proxyHtml}</td>
-        <td class="col-engine">
+        <td class="col-tags" data-col="tags">${tagsHtml}</td>
+        <td class="col-notes" data-col="notes">
+          <span class="text-xs text-muted" title="${escapeHtml(p.notes || '')}">
+            ${p.notes ? escapeHtml(p.notes) : '&mdash;'}
+          </span>
+        </td>
+        <td class="col-proxy" data-col="proxy">${proxyHtml}</td>
+        <td class="col-engine" data-col="engine">
           <span class="engine-badge ${engineType}">
             <i class="${engineIcon}"></i> ${engineLabel}
           </span>
         </td>
-        <td class="col-last-active">
+        <td class="col-last-active" data-col="last-active">
           <span class="text-muted text-xs">${escapeHtml(lastActiveText)}</span>
         </td>
-        <td class="col-actions text-right">
+        <td class="col-created" data-col="created">
+          <span class="text-muted text-xs">
+            ${p.createdAt ? new Date(p.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '&mdash;'}
+          </span>
+        </td>
+        <td class="col-actions text-right" data-col="manage">
           <div class="table-actions-inline">
             <button class="btn-icon-subtle" onclick="openProfileFolder('${escapeHtml(p.id)}')" title="Open Profile Data Folder">
               <i class="fa-solid fa-folder-open"></i>
@@ -2056,6 +2245,21 @@ function setupEventListeners() {
         closeModal(activeModal.id);
       } else if (document.activeElement === document.getElementById('search-input')) {
         document.getElementById('search-input').blur();
+      }
+      const popover = document.getElementById('custom-columns-popover');
+      if (popover && !popover.classList.contains('hidden')) {
+        popover.classList.add('hidden');
+      }
+    }
+  });
+
+  // Close column customizer on outside click
+  document.addEventListener('click', (e) => {
+    const popover = document.getElementById('custom-columns-popover');
+    const btn = document.getElementById('btn-customize-columns');
+    if (popover && !popover.classList.contains('hidden')) {
+      if (!popover.contains(e.target) && !btn?.contains(e.target)) {
+        popover.classList.add('hidden');
       }
     }
   });

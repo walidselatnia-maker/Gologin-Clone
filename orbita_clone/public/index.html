@@ -175,6 +175,14 @@
             <button class="btn btn-icon" id="btn-refresh" title="Refresh Profiles">
               <i class="fa-solid fa-rotate-right"></i>
             </button>
+
+            <!-- Column Visibility Customizer Dropdown (GoLogin Style) -->
+            <div class="custom-columns-wrap">
+              <button class="btn btn-icon btn-secondary" id="btn-customize-columns" title="Customize Columns &amp; Visible Sections" onclick="toggleColumnCustomizer(event)">
+                <i class="fa-solid fa-sliders"></i>
+              </button>
+              <div class="custom-columns-popover hidden" id="custom-columns-popover"></div>
+            </div>
           </div>
         </div>
 
@@ -241,6 +249,10 @@
                     <span>Tags</span>
                     <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
                   </th>
+                  <th class="col-notes" data-col="notes" style="width: 160px;">
+                    <span>Notes</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
                   <th class="col-proxy" data-col="proxy" style="width: 170px;">
                     <span>Proxy &amp; Latency</span>
                     <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
@@ -251,6 +263,10 @@
                   </th>
                   <th class="col-last-active" data-col="last-active" style="width: 110px;">
                     <span>Last Active</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-created" data-col="created" style="width: 115px;">
+                    <span>Created</span>
                     <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
                   </th>
                   <th class="col-actions text-right" data-col="manage" style="width: 130px;">

@@ -184,7 +184,7 @@ function importGoLoginProfiles({ selectedIds = [], customDir = null, PROFILES_FI
       id: newProfileId,
       name: item.name,
       tags: ['GoLogin', 'Imported'],
-      notes: `Imported directly from official GoLogin desktop installation on ${new Date().toLocaleDateString()}. Includes all active cookies and saved passwords.`,
+      notes: '',
       engine: 'orbita',
       proxy: {
         mode: item.proxy?.mode === 'socks5' ? 'socks5' : (item.proxy?.mode === 'socks4' ? 'socks4' : (item.proxy?.mode === 'http' ? 'http' : 'none')),
