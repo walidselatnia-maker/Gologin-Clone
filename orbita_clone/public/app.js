@@ -1,11 +1,18 @@
 // State
 let profiles = [];
+let folders = [];
+let currentFolderId = 'all'; // 'all', 'unorganized', or folder id
+let currentStatusFilter = 'all'; // 'all', 'running', 'stopped'
+let currentProxyFilter = 'all'; // 'all', 'proxied', 'direct'
+let currentTagFilter = 'all';
+let currentSort = 'name_asc';
 let selectedProfileIds = new Set();
 let editingProfileId = null;
 let currentFingerprint = null;
 let isPolling = false;
 let currentView = 'profiles';
 let systemInfo = null;
+let editingFolderId = null;
 
 // Toast Notification
 function showToast(message, type = 'info', duration = 3500) {
@@ -58,16 +65,20 @@ function copyToClipboard(text, label = 'Text') {
 async function init() {
   console.log('Initializing Orbita Anti-Detect UI...');
   setupModalDismissals();
+  setupFolderColorPicker();
   setupEventListeners();
   
   await loadSystemInfo();
+  await loadFolders();
   await loadProfiles();
   await loadUpdatesStatus();
+  checkGoLoginProfiles(false);
 
   // Periodic polling for running status and background updates
   setInterval(async () => {
     if (!isPolling && !editingProfileId) {
       await loadProfiles(false);
+      await loadFolders(false);
     }
   }, 3000);
 
@@ -102,6 +113,297 @@ async function loadSystemInfo() {
   }
 }
 
+// -------------------------------------------------------------
+// FOLDERS MANAGEMENT
+// -------------------------------------------------------------
+async function loadFolders(updateUI = true) {
+  try {
+    const res = await fetch('/api/folders');
+    if (!res.ok) return;
+    const data = await res.json();
+    folders = data.folders || [];
+
+    if (updateUI) {
+      renderSidebarFolders(data);
+      populateFolderDropdowns();
+    }
+  } catch (err) {
+    console.error('Failed to load folders:', err);
+  }
+}
+
+function renderSidebarFolders(data) {
+  const allBadge = document.getElementById('folder-badge-all');
+  if (allBadge) allBadge.textContent = data.totalProfiles !== undefined ? data.totalProfiles : profiles.length;
+
+  const unorgBadge = document.getElementById('folder-badge-unorganized');
+  if (unorgBadge) unorgBadge.textContent = data.unorganizedCount !== undefined ? data.unorganizedCount : profiles.filter(p => !p.folder).length;
+
+  const container = document.getElementById('sidebar-custom-folders');
+  if (!container) return;
+
+  container.innerHTML = folders.map(f => `
+    <div class="nav-folder-item ${currentFolderId === f.id ? 'active' : ''}" data-folder="${escapeHtml(f.id)}" onclick="selectFolder('${escapeHtml(f.id)}')">
+      <span class="folder-color-dot" style="background-color: ${escapeHtml(f.color || '#00b86d')};"></span>
+      <span class="folder-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+      <span class="badge">${f.count || 0}</span>
+      <div class="folder-item-actions">
+        <button class="btn-icon-xs" title="Edit Folder" onclick="event.stopPropagation(); openEditFolderModal('${escapeHtml(f.id)}')">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        <button class="btn-icon-xs" title="Delete Folder" onclick="event.stopPropagation(); deleteFolder('${escapeHtml(f.id)}')">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  // Update top active state
+  const allItem = document.getElementById('folder-item-all');
+  const unorgItem = document.getElementById('folder-item-unorganized');
+  if (allItem) allItem.classList.toggle('active', currentFolderId === 'all');
+  if (unorgItem) unorgItem.classList.toggle('active', currentFolderId === 'unorganized');
+}
+
+function selectFolder(folderId) {
+  currentFolderId = folderId;
+
+  // Update folder item active styles
+  document.querySelectorAll('.nav-folder-item').forEach(el => {
+    if (el.dataset.folder === folderId) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+
+  // Update topbar breadcrumb / title
+  const titleEl = document.getElementById('topbar-active-folder-title');
+  const iconEl = document.getElementById('topbar-folder-icon');
+  if (folderId === 'all') {
+    if (titleEl) titleEl.textContent = 'All Profiles';
+    if (iconEl) {
+      iconEl.className = 'fa-solid fa-folder-open text-green';
+      iconEl.style.color = '';
+    }
+  } else if (folderId === 'unorganized') {
+    if (titleEl) titleEl.textContent = 'Unorganized Profiles';
+    if (iconEl) {
+      iconEl.className = 'fa-solid fa-inbox text-muted';
+      iconEl.style.color = '';
+    }
+  } else {
+    const f = folders.find(item => item.id === folderId);
+    if (f) {
+      if (titleEl) titleEl.textContent = f.name;
+      if (iconEl) {
+        iconEl.className = 'fa-solid fa-folder';
+        iconEl.style.color = f.color || '#00b86d';
+      }
+    }
+  }
+
+  // Switch view to profiles if not already
+  if (currentView !== 'profiles') {
+    switchView('profiles');
+  }
+
+  renderProfilesTable();
+}
+
+function populateFolderDropdowns() {
+  const pFolderSelect = document.getElementById('p-folder');
+  const bulkFolderSelect = document.getElementById('bulk-folder');
+  const moveFolderSelect = document.getElementById('move-folder-select');
+
+  const optionsHtml = `
+    <option value="">No Folder (Unorganized)</option>
+    ${folders.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)}</option>`).join('')}
+  `;
+
+  if (pFolderSelect) pFolderSelect.innerHTML = optionsHtml;
+  if (bulkFolderSelect) bulkFolderSelect.innerHTML = optionsHtml;
+  if (moveFolderSelect) {
+    let moveOptions = folders.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)}</option>`).join('');
+    moveOptions += `<option value="">(None) Remove from Folder</option>`;
+    moveFolderSelect.innerHTML = moveOptions;
+  }
+}
+
+function openCreateFolderModal() {
+  editingFolderId = null;
+  document.getElementById('folder-modal-title').textContent = 'Create Folder';
+  document.getElementById('folder-name-input').value = '';
+  document.getElementById('folder-edit-id').value = '';
+  document.getElementById('folder-color-input').value = '#00b86d';
+
+  // Highlight color
+  document.querySelectorAll('#folder-color-palette .color-choice').forEach(el => {
+    el.classList.toggle('selected', el.dataset.color === '#00b86d');
+  });
+
+  openModal('folder-modal');
+  setTimeout(() => document.getElementById('folder-name-input').focus(), 50);
+}
+
+function openEditFolderModal(id) {
+  const f = folders.find(item => item.id === id);
+  if (!f) return;
+
+  editingFolderId = id;
+  document.getElementById('folder-modal-title').textContent = 'Edit Folder';
+  document.getElementById('folder-name-input').value = f.name;
+  document.getElementById('folder-edit-id').value = id;
+  const col = f.color || '#00b86d';
+  document.getElementById('folder-color-input').value = col;
+
+  document.querySelectorAll('#folder-color-palette .color-choice').forEach(el => {
+    el.classList.toggle('selected', el.dataset.color === col);
+  });
+
+  openModal('folder-modal');
+  setTimeout(() => document.getElementById('folder-name-input').focus(), 50);
+}
+
+function setupFolderColorPicker() {
+  const palette = document.getElementById('folder-color-palette');
+  if (!palette) return;
+
+  palette.addEventListener('click', (e) => {
+    const choice = e.target.closest('.color-choice');
+    if (!choice) return;
+
+    palette.querySelectorAll('.color-choice').forEach(c => c.classList.remove('selected'));
+    choice.classList.add('selected');
+    document.getElementById('folder-color-input').value = choice.dataset.color;
+  });
+}
+
+async function saveFolderModal() {
+  const nameInput = document.getElementById('folder-name-input');
+  const name = nameInput.value.trim();
+  if (!name) {
+    showToast('Folder name is required!', 'error');
+    nameInput.focus();
+    return;
+  }
+
+  const color = document.getElementById('folder-color-input').value || '#00b86d';
+  const editId = document.getElementById('folder-edit-id').value;
+
+  try {
+    if (editId) {
+      const res = await fetch(`/api/folders/${editId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color })
+      });
+      if (!res.ok) throw new Error('Failed to update folder');
+      showToast(`Folder "${name}" updated!`, 'success');
+    } else {
+      const res = await fetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color })
+      });
+      if (!res.ok) throw new Error('Failed to create folder');
+      showToast(`Folder "${name}" created!`, 'success');
+    }
+
+    closeModal('folder-modal');
+    await loadFolders();
+    await loadProfiles(false);
+  } catch (err) {
+    showToast('Folder error: ' + err.message, 'error');
+  }
+}
+
+async function deleteFolder(id) {
+  const f = folders.find(item => item.id === id);
+  const name = f ? f.name : 'this folder';
+
+  if (!confirm(`Are you sure you want to delete folder "${name}"?\n(Profiles inside this folder will NOT be deleted, they will be moved to Unorganized.)`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/folders/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete folder');
+    showToast(`Folder "${name}" deleted`, 'success');
+
+    if (currentFolderId === id) {
+      selectFolder('all');
+    } else {
+      await loadFolders();
+      await loadProfiles(false);
+    }
+  } catch (err) {
+    showToast('Failed to delete folder: ' + err.message, 'error');
+  }
+}
+
+function openMoveToFolderModal() {
+  const count = selectedProfileIds.size;
+  if (count === 0) {
+    showToast('Please select at least 1 profile to move', 'info');
+    return;
+  }
+
+  document.getElementById('move-folder-count').textContent = count;
+  populateFolderDropdowns();
+  openModal('move-folder-modal');
+}
+
+async function executeMoveToFolder() {
+  const targetFolder = document.getElementById('move-folder-select').value || null;
+  const ids = Array.from(selectedProfileIds);
+
+  try {
+    const res = await fetch('/api/profiles/move-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileIds: ids, folderId: targetFolder })
+    });
+    const data = await res.json();
+    closeModal('move-folder-modal');
+    showToast(`Moved ${data.movedCount} profile(s) successfully!`, 'success');
+
+    selectedProfileIds.clear();
+    await loadFolders();
+    await loadProfiles(false);
+  } catch (err) {
+    showToast('Failed to move profiles: ' + err.message, 'error');
+  }
+}
+
+function populateTagFilters() {
+  const select = document.getElementById('filter-tag-select');
+  if (!select) return;
+
+  const currentVal = select.value || 'all';
+  const tagSet = new Set();
+  profiles.forEach(p => {
+    if (p.tags && Array.isArray(p.tags)) {
+      p.tags.forEach(t => {
+        if (t && t.trim()) tagSet.add(t.trim());
+      });
+    }
+  });
+
+  const sortedTags = Array.from(tagSet).sort((a, b) => a.localeCompare(b));
+  select.innerHTML = `
+    <option value="all">All Tags</option>
+    ${sortedTags.map(t => `<option value="${escapeHtml(t)}">#${escapeHtml(t)}</option>`).join('')}
+  `;
+
+  if (tagSet.has(currentVal)) {
+    select.value = currentVal;
+  } else {
+    select.value = 'all';
+    currentTagFilter = 'all';
+  }
+}
+
 async function loadProfiles(showLoader = true) {
   isPolling = true;
   const tbody = document.getElementById('profiles-table-body');
@@ -127,6 +429,7 @@ async function loadProfiles(showLoader = true) {
     const runningCount = profiles.filter(p => p.isRunning).length;
     document.getElementById('stat-running').textContent = runningCount;
 
+    populateTagFilters();
     renderProfilesTable();
     if (currentView === 'proxies') {
       renderProxyManager();
@@ -144,69 +447,152 @@ async function loadProfiles(showLoader = true) {
 // -------------------------------------------------------------
 function renderProfilesTable() {
   const tbody = document.getElementById('profiles-table-body');
+  const tableContainer = document.getElementById('profiles-table-container');
+  const emptyState = document.getElementById('profiles-empty-state');
   const searchInput = document.getElementById('search-input');
-  const filterStatus = document.getElementById('filter-status').value;
-  const filterEngine = document.getElementById('filter-engine').value;
-  const query = searchInput.value.toLowerCase().trim();
+  const filterEngineEl = document.getElementById('filter-engine');
+  const filterEngine = filterEngineEl ? filterEngineEl.value : 'all';
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
 
   // Filter profiles
-  const filtered = profiles.filter(p => {
-    // Search query
-    const matchSearch = !query || 
-      p.name.toLowerCase().includes(query) ||
-      (p.tags && p.tags.some(t => t.toLowerCase().includes(query))) ||
-      (p.proxy && p.proxy.host && p.proxy.host.toLowerCase().includes(query)) ||
-      (p.notes && p.notes.toLowerCase().includes(query));
+  let filtered = profiles.filter(p => {
+    // 1. Folder filter
+    if (currentFolderId === 'unorganized') {
+      if (p.folder) return false;
+    } else if (currentFolderId !== 'all') {
+      if (p.folder !== currentFolderId) return false;
+    }
 
-    // Status filter
-    let matchStatus = true;
-    if (filterStatus === 'running') matchStatus = p.isRunning === true;
-    if (filterStatus === 'stopped') matchStatus = !p.isRunning;
+    // 2. Search query
+    if (query) {
+      const matchName = p.name && p.name.toLowerCase().includes(query);
+      const matchTags = p.tags && p.tags.some(t => t.toLowerCase().includes(query));
+      const matchProxy = p.proxy && p.proxy.host && p.proxy.host.toLowerCase().includes(query);
+      const matchNotes = p.notes && p.notes.toLowerCase().includes(query);
+      if (!matchName && !matchTags && !matchProxy && !matchNotes) return false;
+    }
 
-    // Engine filter
-    let matchEngine = true;
-    if (filterEngine !== 'all') matchEngine = p.engine === filterEngine;
+    // 3. Status filter
+    if (currentStatusFilter === 'running' && !p.isRunning) return false;
+    if (currentStatusFilter === 'stopped' && p.isRunning) return false;
 
-    return matchSearch && matchStatus && matchEngine;
+    // 4. Proxy filter
+    const isProxied = p.proxy && p.proxy.mode && p.proxy.mode !== 'none' && p.proxy.host;
+    if (currentProxyFilter === 'proxied' && !isProxied) return false;
+    if (currentProxyFilter === 'direct' && isProxied) return false;
+
+    // 5. Engine filter
+    if (filterEngine !== 'all' && p.engine !== filterEngine) return false;
+
+    // 6. Tag filter
+    if (currentTagFilter !== 'all') {
+      if (!p.tags || !p.tags.includes(currentTagFilter)) return false;
+    }
+
+    return true;
   });
 
+  // Sort profiles
+  filtered.sort((a, b) => {
+    if (currentSort === 'name_asc') {
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
+    } else if (currentSort === 'name_desc') {
+      return (b.name || '').localeCompare(a.name || '', undefined, { numeric: true, sensitivity: 'base' });
+    } else if (currentSort === 'recent_launch') {
+      const timeA = a.lastLaunched ? new Date(a.lastLaunched).getTime() : 0;
+      const timeB = b.lastLaunched ? new Date(b.lastLaunched).getTime() : 0;
+      return timeB - timeA;
+    } else if (currentSort === 'newest') {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    } else if (currentSort === 'status') {
+      return (b.isRunning ? 1 : 0) - (a.isRunning ? 1 : 0);
+    }
+    return 0;
+  });
+
+  // Toggle Empty State vs Table
   if (filtered.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="8" class="text-center py-12">
-          <i class="fa-solid fa-ghost text-muted" style="font-size: 32px; margin-bottom: 12px; display: block;"></i>
-          <p class="text-muted">
-            ${profiles.length === 0 ? 'No profiles yet. Click "+ New Profile" or "Bulk Add" above to start!' : 'No profiles match your filter criteria.'}
-          </p>
-        </td>
-      </tr>
-    `;
+    if (tbody) tbody.innerHTML = '';
+    if (tableContainer) tableContainer.style.display = 'none';
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      const emptyTitle = document.getElementById('empty-state-title');
+      const emptyDesc = document.getElementById('empty-state-desc');
+      if (profiles.length === 0) {
+        if (emptyTitle) emptyTitle.textContent = 'No Browser Profiles Found';
+        if (emptyDesc) emptyDesc.textContent = 'Get started by creating your first stealth profile or importing from GoLogin in 1 click.';
+      } else {
+        if (emptyTitle) emptyTitle.textContent = 'No Profiles Found in this View';
+        if (emptyDesc) emptyDesc.textContent = 'No profiles match your active folder or filter criteria. Try selecting "All Profiles" or clearing your search.';
+      }
+    }
     updateBulkBar();
     return;
   }
 
+  if (tableContainer) tableContainer.style.display = 'block';
+  if (emptyState) emptyState.style.display = 'none';
+
+  // Render Table Rows
   tbody.innerHTML = filtered.map(p => {
     const isSelected = selectedProfileIds.has(p.id);
     const isRunning = p.isRunning;
-    
-    // Proxy string
-    let proxyHtml = `<span class="text-muted"><i class="fa-solid fa-globe"></i> Direct</span>`;
+
+    // Quick Start/Stop Button
+    const actionBtnHtml = isRunning ? `
+      <button class="btn-table-stop" onclick="stopSingleProfile('${escapeHtml(p.id)}')" title="Stop Profile Process">
+        <i class="fa-solid fa-stop"></i> Stop
+      </button>
+    ` : `
+      <button class="btn-table-start" onclick="startSingleProfile('${escapeHtml(p.id)}')" title="Launch Anti-Detect Browser">
+        <i class="fa-solid fa-play"></i> Start
+      </button>
+    `;
+
+    // Folder badge pill
+    let folderBadgeHtml = '';
+    if (p.folder) {
+      const folderObj = folders.find(f => f.id === p.folder);
+      if (folderObj) {
+        folderBadgeHtml = `
+          <span class="folder-badge-pill" style="border-left: 3px solid ${escapeHtml(folderObj.color || '#00b86d')}">
+            <i class="fa-solid fa-folder"></i> ${escapeHtml(folderObj.name)}
+          </span>
+        `;
+      }
+    }
+
+    // Hardware Specs / OS Icon
+    const fp = p.fingerprint || {};
+    const osIcon = (fp.os && fp.os.includes('Mac')) ? 'fa-apple' : (fp.os && fp.os.includes('Linux') ? 'fa-linux' : 'fa-windows');
+
+    // Tags
+    const tagsHtml = (p.tags && p.tags.length > 0)
+      ? `<div class="tag-pills-wrap">${p.tags.map(t => `<span class="tag-pill">#${escapeHtml(t)}</span>`).join('')}</div>`
+      : `<span class="text-xs text-muted">&mdash;</span>`;
+
+    // Proxy Cell
+    let proxyHtml = `<span class="text-xs text-muted"><i class="fa-solid fa-globe"></i> Direct</span>`;
     if (p.proxy && p.proxy.mode !== 'none' && p.proxy.host) {
       const mode = p.proxy.mode.toUpperCase();
       const ipPort = `${p.proxy.host}:${p.proxy.port}`;
       proxyHtml = `
-        <div class="proxy-cell-content">
-          <i class="fa-solid fa-shield-halved text-green"></i>
-          <span class="proxy-ip-copy" title="Click to copy proxy" onclick="copyToClipboard('${escapeHtml(ipPort)}', 'Proxy')">${escapeHtml(ipPort)}</span>
+        <div class="proxy-cell-box">
+          <div class="flex-center gap-1">
+            <span class="status-dot ${isRunning ? 'online' : ''}" style="width: 6px; height: 6px;"></span>
+            <span class="text-xs font-semibold text-green">${escapeHtml(mode)}</span>
+            <span class="proxy-ip-label" title="Click to copy proxy" onclick="copyToClipboard('${escapeHtml(ipPort)}', 'Proxy')">${escapeHtml(ipPort)}</span>
+          </div>
         </div>
       `;
     }
 
-    // Engine badge - Orbita by default
+    // Engine Badge
     let engineType = 'orbita';
     let engineLabel = 'Orbita';
     let engineIcon = 'fa-solid fa-shield-halved';
-
     if (p.engine === 'chrome') {
       engineType = 'chrome';
       engineLabel = 'Chrome';
@@ -221,80 +607,59 @@ function renderProfilesTable() {
       engineIcon = 'fa-solid fa-shield-cat';
     }
 
-    // Hardware Specs Chip
-    const fp = p.fingerprint || {};
-    const osIcon = (fp.os && fp.os.includes('Mac')) ? 'fa-apple' : (fp.os && fp.os.includes('Linux') ? 'fa-linux' : 'fa-windows');
-    const res = fp.screenResolution || '1080p';
-    const cores = fp.cpuCores || 8;
-    const ram = fp.ramGb || 16;
-    const gpu = fp.webglRenderer ? fp.webglRenderer.replace(/ANGLE \((.*?),/, '$1').trim() : 'NVIDIA RTX';
-
-    // Tags
-    const tagsHtml = (p.tags && p.tags.length > 0)
-      ? p.tags.map(t => `<span class="tag-badge">#${escapeHtml(t)}</span>`).join('')
-      : '';
+    // Last Active Date Formatter
+    let lastActiveText = 'Never';
+    if (p.lastLaunched) {
+      const d = new Date(p.lastLaunched);
+      const now = new Date();
+      const diffMs = now - d;
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) lastActiveText = 'Just now';
+      else if (diffMins < 60) lastActiveText = `${diffMins}m ago`;
+      else if (diffMins < 1440) lastActiveText = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      else lastActiveText = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
 
     return `
-      <tr class="${isSelected ? 'selected' : ''}" data-id="${p.id}">
-        <td class="text-center">
-          <input type="checkbox" class="profile-row-checkbox" data-id="${p.id}" ${isSelected ? 'checked' : ''}>
+      <tr class="${isSelected ? 'selected' : ''} ${isRunning ? 'row-running' : ''}" data-id="${escapeHtml(p.id)}">
+        <td class="text-center col-checkbox">
+          <input type="checkbox" class="profile-row-checkbox" data-id="${escapeHtml(p.id)}" ${isSelected ? 'checked' : ''}>
         </td>
-        <td>
-          <div class="profile-cell">
+        <td class="col-quick-action">
+          ${actionBtnHtml}
+        </td>
+        <td class="col-profile">
+          <div class="profile-cell-wrap">
             <div class="profile-title-row">
               <i class="fa-brands ${osIcon} text-muted" title="${escapeHtml(fp.os || 'Windows')}"></i>
-              <strong class="profile-name">${escapeHtml(p.name)}</strong>
+              <strong class="profile-main-name" onclick="openEditModal('${escapeHtml(p.id)}')">${escapeHtml(p.name)}</strong>
+              ${folderBadgeHtml}
             </div>
-            ${tagsHtml ? `<div class="profile-tags">${tagsHtml}</div>` : ''}
+            ${p.notes ? `<div class="text-xs text-muted" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px;"><i class="fa-regular fa-note-sticky"></i> ${escapeHtml(p.notes)}</div>` : ''}
           </div>
         </td>
-        <td>
+        <td class="col-tags">${tagsHtml}</td>
+        <td class="col-proxy">${proxyHtml}</td>
+        <td class="col-engine">
           <span class="engine-badge ${engineType}">
             <i class="${engineIcon}"></i> ${engineLabel}
           </span>
         </td>
-        <td>
-          <span class="status-badge ${isRunning ? 'running' : 'stopped'}">
-            ${isRunning ? '<span class="live-dot"></span>' : '<span style="font-size: 8px;">⚪</span>'}
-            ${isRunning ? 'Running' : 'Stopped'}
-          </span>
+        <td class="col-last-active">
+          <span class="text-muted text-xs">${escapeHtml(lastActiveText)}</span>
         </td>
-        <td>${proxyHtml}</td>
-        <td>
-          <div class="fp-cell">
-            <div class="fp-chips">
-              <span class="fp-chip" title="Resolution">${escapeHtml(res)}</span>
-              <span class="fp-chip" title="Hardware">${cores}C / ${ram}GB</span>
-            </div>
-            <span class="fp-gpu-sub" title="${escapeHtml(fp.webglRenderer || '')}">${escapeHtml(gpu)}</span>
-          </div>
-        </td>
-        <td>
-          <span class="text-muted text-xs">
-            ${p.lastLaunched ? new Date(p.lastLaunched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
-          </span>
-        </td>
-        <td>
-          <div class="table-actions">
-            ${isRunning ? `
-              <button class="btn btn-sm btn-danger" onclick="stopSingleProfile('${p.id}')" title="Stop Profile">
-                <i class="fa-solid fa-stop"></i> Stop
-              </button>
-            ` : `
-              <button class="btn btn-sm btn-success" onclick="startSingleProfile('${p.id}')" title="Start Anti-Detect Browser">
-                <i class="fa-solid fa-play"></i> Start
-              </button>
-            `}
-            <button class="action-icon-btn" onclick="openProfileFolder('${p.id}')" title="Open Data Folder in File Manager">
+        <td class="col-actions text-right">
+          <div class="table-actions-inline">
+            <button class="btn-icon-subtle" onclick="openProfileFolder('${escapeHtml(p.id)}')" title="Open Profile Data Folder">
               <i class="fa-solid fa-folder-open"></i>
             </button>
-            <button class="action-icon-btn" onclick="openEditModal('${p.id}')" title="Edit Profile & Fingerprint">
+            <button class="btn-icon-subtle" onclick="openEditModal('${escapeHtml(p.id)}')" title="Edit Profile & Fingerprint">
               <i class="fa-solid fa-pen-to-square"></i>
             </button>
-            <button class="action-icon-btn" onclick="cloneSingleProfile('${p.id}')" title="Clone with New Fingerprint">
+            <button class="btn-icon-subtle" onclick="cloneSingleProfile('${escapeHtml(p.id)}')" title="Clone with Fresh Fingerprint">
               <i class="fa-solid fa-clone"></i>
             </button>
-            <button class="action-icon-btn delete-btn" onclick="deleteSingleProfile('${p.id}')" title="Delete Profile">
+            <button class="btn-icon-subtle text-danger" onclick="deleteSingleProfile('${escapeHtml(p.id)}')" title="Delete Profile">
               <i class="fa-solid fa-trash"></i>
             </button>
           </div>
@@ -437,6 +802,7 @@ async function deleteSingleProfile(id) {
     await fetch(`/api/profiles/${id}`, { method: 'DELETE' });
     selectedProfileIds.delete(id);
     showToast('Profile deleted successfully', 'success');
+    await loadFolders();
     await loadProfiles(false);
   } catch (err) {
     showToast('Delete error: ' + err.message, 'error');
@@ -527,6 +893,7 @@ async function executeBulkDelete() {
     const data = await res.json();
     selectedProfileIds.clear();
     showToast(`Deleted ${data.count} profiles`, 'success');
+    await loadFolders();
     await loadProfiles(false);
   } catch (err) {
     showToast('Error deleting profiles: ' + err.message, 'error');
@@ -581,6 +948,11 @@ function openCreateModal() {
   document.getElementById('p-tags').value = '';
   document.getElementById('p-notes').value = '';
 
+  const pFolder = document.getElementById('p-folder');
+  if (pFolder) {
+    pFolder.value = (currentFolderId && currentFolderId !== 'all' && currentFolderId !== 'unorganized') ? currentFolderId : '';
+  }
+
   const noProxyRadio = document.querySelector('input[name="proxy-type"][value="none"]');
   if (noProxyRadio) noProxyRadio.checked = true;
   document.getElementById('proxy-details-box').style.display = 'none';
@@ -615,6 +987,11 @@ function openEditModal(id) {
   document.getElementById('p-engine').value = p.engine || 'orbita';
   document.getElementById('p-tags').value = (p.tags || []).join(', ');
   document.getElementById('p-notes').value = p.notes || '';
+
+  const pFolder = document.getElementById('p-folder');
+  if (pFolder) {
+    pFolder.value = p.folder || '';
+  }
 
   const mode = p.proxy?.mode || 'none';
   const radio = document.querySelector(`input[name="proxy-type"][value="${mode}"]`);
@@ -697,8 +1074,12 @@ async function saveProfile() {
   const ramSelect = document.getElementById('fp-ram');
   const uaInput = document.getElementById('fp-ua');
 
+  const folderSelect = document.getElementById('p-folder');
+  const folder = folderSelect ? (folderSelect.value || null) : null;
+
   const payload = {
     name,
+    folder,
     engine: engineSelect ? engineSelect.value : 'camoufox',
     tags,
     notes: notesInput ? notesInput.value.trim() : '',
@@ -743,6 +1124,7 @@ async function saveProfile() {
     }
     closeModal('profile-modal');
     editingProfileId = null;
+    await loadFolders();
     await loadProfiles(false);
   } catch (err) {
     console.error('saveProfile error:', err);
@@ -756,6 +1138,8 @@ async function executeBulkCreate() {
   const baseName = document.getElementById('bulk-basename').value.trim() || 'Profile';
   const os = document.getElementById('bulk-os').value;
   const engine = document.getElementById('bulk-engine').value || 'orbita';
+  const bulkFolder = document.getElementById('bulk-folder');
+  const folder = bulkFolder ? (bulkFolder.value || null) : null;
   const tags = document.getElementById('bulk-tags').value.split(',').map(t => t.trim()).filter(Boolean);
   const proxiesText = document.getElementById('bulk-proxies-text').value.trim();
 
@@ -777,11 +1161,12 @@ async function executeBulkCreate() {
     const res = await fetch('/api/profiles/bulk-create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count, baseName, os, engine, tags, proxiesList })
+      body: JSON.stringify({ count, baseName, os, engine, folder, tags, proxiesList })
     });
     const data = await res.json();
     closeModal('bulk-modal');
     showToast(`Created ${data.count} new profiles with unique fingerprints!`, 'success');
+    await loadFolders();
     await loadProfiles(false);
   } catch (err) {
     showToast('Bulk create failed: ' + err.message, 'error');
@@ -864,7 +1249,7 @@ function switchView(viewName) {
   });
 
   // 2. Hide all view panes, show target
-  const views = ['profiles', 'proxies', 'fingerprints', 'engines'];
+  const views = ['profiles', 'proxies', 'fingerprints', 'engines', 'cloud-sync'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     if (el) {
@@ -902,6 +1287,12 @@ function switchView(viewName) {
     if (newBtn) newBtn.style.display = 'none';
     renderEnginesView();
     renderUpdatesNotification();
+  } else if (viewName === 'cloud-sync') {
+    if (titleEl) titleEl.textContent = 'Cloud Storage Sync (MinIO / S3)';
+    if (bulkBtn) bulkBtn.style.display = 'none';
+    if (newBtn) newBtn.style.display = 'none';
+    loadCloudConfig();
+    renderCloudProfilesTable();
   }
 }
 
@@ -1192,9 +1583,25 @@ async function testFirstProfileWithEngine(engineId) {
 function setupEventListeners() {
   // Modal Open Buttons
   document.getElementById('btn-create-profile').addEventListener('click', openCreateModal);
-  document.getElementById('btn-open-bulk-modal').addEventListener('click', () => openModal('bulk-modal'));
+  document.getElementById('btn-open-bulk-modal').addEventListener('click', () => {
+    populateFolderDropdowns();
+    openModal('bulk-modal');
+  });
   document.getElementById('btn-bulk-proxy-modal').addEventListener('click', () => openModal('bulk-proxy-modal'));
   document.getElementById('btn-bulk-tag-modal').addEventListener('click', () => openModal('bulk-tag-modal'));
+
+  // Folder Buttons
+  const btnCreateFolder = document.getElementById('btn-create-folder');
+  if (btnCreateFolder) btnCreateFolder.addEventListener('click', openCreateFolderModal);
+
+  const folderItemAll = document.getElementById('folder-item-all');
+  if (folderItemAll) folderItemAll.addEventListener('click', (e) => { e.preventDefault(); selectFolder('all'); });
+
+  const folderItemUnorg = document.getElementById('folder-item-unorganized');
+  if (folderItemUnorg) folderItemUnorg.addEventListener('click', (e) => { e.preventDefault(); selectFolder('unorganized'); });
+
+  const btnEmptyCreate = document.getElementById('btn-empty-create');
+  if (btnEmptyCreate) btnEmptyCreate.addEventListener('click', openCreateModal);
 
   // Execution Buttons
   document.getElementById('modal-save-btn').addEventListener('click', saveProfile);
@@ -1208,6 +1615,47 @@ function setupEventListeners() {
   document.getElementById('btn-bulk-fp').addEventListener('click', executeBulkRandomizeFp);
   document.getElementById('btn-bulk-delete').addEventListener('click', executeBulkDelete);
   document.getElementById('btn-bulk-deselect').addEventListener('click', deselectAll);
+
+  // Filter Chips
+  document.querySelectorAll('.filter-chip[data-status-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.filter-chip[data-status-filter]').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      currentStatusFilter = chip.dataset.statusFilter;
+      renderProfilesTable();
+    });
+  });
+
+  document.querySelectorAll('.filter-chip[data-proxy-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (chip.classList.contains('active')) {
+        chip.classList.remove('active');
+        currentProxyFilter = 'all';
+      } else {
+        document.querySelectorAll('.filter-chip[data-proxy-filter]').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        currentProxyFilter = chip.dataset.proxyFilter;
+      }
+      renderProfilesTable();
+    });
+  });
+
+  // Sort & Tag Selectors
+  const sortSelect = document.getElementById('sort-profiles');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      currentSort = sortSelect.value;
+      renderProfilesTable();
+    });
+  }
+
+  const tagSelect = document.getElementById('filter-tag-select');
+  if (tagSelect) {
+    tagSelect.addEventListener('change', () => {
+      currentTagFilter = tagSelect.value;
+      renderProfilesTable();
+    });
+  }
 
   // Search & Filters
   const searchInput = document.getElementById('search-input');
@@ -1230,10 +1678,13 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('filter-status').addEventListener('change', renderProfilesTable);
-  document.getElementById('filter-engine').addEventListener('change', renderProfilesTable);
+  const filterStatusEl = document.getElementById('filter-status');
+  if (filterStatusEl) filterStatusEl.addEventListener('change', renderProfilesTable);
+  const filterEngineEl = document.getElementById('filter-engine');
+  if (filterEngineEl) filterEngineEl.addEventListener('change', renderProfilesTable);
   document.getElementById('btn-refresh').addEventListener('click', () => {
     showToast('Refreshing profiles...', 'info', 1000);
+    loadFolders();
     loadProfiles();
   });
 
@@ -1587,6 +2038,509 @@ async function downloadEngineUpdate(key, name, version) {
   }
 }
 
+// -------------------------------------------------------------
+// CLOUD STORAGE SYNC (MinIO / S3 VPS)
+// -------------------------------------------------------------
+let cloudConfigCache = null;
+
+async function loadCloudConfig() {
+  try {
+    const res = await fetch('/api/cloud/config');
+    const cfg = await res.json();
+    cloudConfigCache = cfg;
+
+    const enabledToggle = document.getElementById('cloud-enabled-toggle');
+    const endpointInput = document.getElementById('cloud-endpoint');
+    const bucketInput = document.getElementById('cloud-bucket');
+    const accessKeyInput = document.getElementById('cloud-access-key');
+    const secretKeyInput = document.getElementById('cloud-secret-key');
+    const autoPullToggle = document.getElementById('cloud-auto-pull');
+    const autoPushToggle = document.getElementById('cloud-auto-push');
+    const lastSyncEl = document.getElementById('cloud-last-sync-text');
+
+    if (enabledToggle) enabledToggle.checked = Boolean(cfg.enabled);
+    if (endpointInput) endpointInput.value = cfg.endpoint || '';
+    if (bucketInput) bucketInput.value = cfg.bucket || 'orbita-profiles';
+    if (accessKeyInput) accessKeyInput.value = cfg.accessKey || '';
+    if (secretKeyInput) secretKeyInput.value = cfg.secretKey || '';
+    if (autoPullToggle) autoPullToggle.checked = cfg.autoSyncOnLaunch !== false;
+    if (autoPushToggle) autoPushToggle.checked = cfg.autoSyncOnClose !== false;
+
+    if (lastSyncEl) {
+      if (cfg.lastSync) {
+        lastSyncEl.textContent = `Last sync: ${new Date(cfg.lastSync).toLocaleString()}`;
+      } else {
+        lastSyncEl.textContent = 'Last sync: Never';
+      }
+    }
+
+    if (cfg.enabled && cfg.endpoint && cfg.accessKey && cfg.hasSecretKey) {
+      testCloudConnection(false);
+    }
+  } catch (err) {
+    console.error('Failed to load cloud config:', err);
+  }
+}
+
+async function saveCloudConfig() {
+  try {
+    const btn = document.getElementById('btn-save-cloud-config');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+      btn.disabled = true;
+    }
+
+    const payload = {
+      enabled: document.getElementById('cloud-enabled-toggle')?.checked || false,
+      endpoint: document.getElementById('cloud-endpoint')?.value?.trim() || '',
+      bucket: document.getElementById('cloud-bucket')?.value?.trim() || 'orbita-profiles',
+      region: 'us-east-1',
+      accessKey: document.getElementById('cloud-access-key')?.value?.trim() || '',
+      secretKey: document.getElementById('cloud-secret-key')?.value?.trim() || '',
+      autoSyncOnLaunch: document.getElementById('cloud-auto-pull')?.checked || false,
+      autoSyncOnClose: document.getElementById('cloud-auto-push')?.checked || false
+    };
+
+    const res = await fetch('/api/cloud/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (btn) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+
+    if (data.success) {
+      showToast('Cloud storage settings saved successfully!', 'success');
+      cloudConfigCache = data.config;
+      testCloudConnection(false);
+    } else {
+      showToast(data.error || 'Failed to save cloud settings', 'error');
+    }
+  } catch (err) {
+    showToast('Network error saving cloud config: ' + err.message, 'error');
+  }
+}
+
+async function testCloudConnection(showToastAlert = true) {
+  const btn = document.getElementById('btn-test-cloud');
+  const origHtml = btn ? btn.innerHTML : '';
+  const statusPill = document.getElementById('cloud-status-pill');
+  const statusText = document.getElementById('cloud-status-text');
+  const latencyPill = document.getElementById('cloud-latency-pill');
+  const latencyText = document.getElementById('cloud-latency-text');
+
+  if (btn && showToastAlert) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+    btn.disabled = true;
+  }
+
+  if (statusPill && statusText) {
+    statusPill.className = 'badge-status checking';
+    statusText.textContent = 'Testing connection...';
+  }
+
+  try {
+    const override = {
+      endpoint: document.getElementById('cloud-endpoint')?.value?.trim() || '',
+      bucket: document.getElementById('cloud-bucket')?.value?.trim() || 'orbita-profiles',
+      accessKey: document.getElementById('cloud-access-key')?.value?.trim() || '',
+      secretKey: document.getElementById('cloud-secret-key')?.value?.trim() || ''
+    };
+
+    const res = await fetch('/api/cloud/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(override)
+    });
+    const result = await res.json();
+
+    if (result.success) {
+      if (statusPill && statusText) {
+        statusPill.className = 'badge-status connected';
+        statusText.textContent = 'Connected (MinIO / S3)';
+      }
+      if (latencyPill && latencyText) {
+        latencyPill.classList.remove('hidden');
+        latencyText.textContent = `${result.latencyMs || 0} ms`;
+      }
+      if (showToastAlert) {
+        showToast(result.message || 'Connected to storage bucket!', 'success');
+      }
+    } else {
+      if (statusPill && statusText) {
+        statusPill.className = 'badge-status disconnected';
+        statusText.textContent = 'Connection Failed';
+      }
+      if (latencyPill) latencyPill.classList.add('hidden');
+      if (showToastAlert) {
+        showToast(result.error || 'Could not connect to MinIO storage', 'error', 6000);
+      }
+    }
+  } catch (err) {
+    if (statusPill && statusText) {
+      statusPill.className = 'badge-status disconnected';
+      statusText.textContent = 'Network Error';
+    }
+    if (latencyPill) latencyPill.classList.add('hidden');
+    if (showToastAlert) {
+      showToast('Connection test error: ' + err.message, 'error');
+    }
+  } finally {
+    if (btn && showToastAlert) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function syncPushAll() {
+  const btn = document.getElementById('btn-cloud-push-all');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading...';
+    btn.disabled = true;
+  }
+
+  try {
+    const res = await fetch('/api/cloud/sync-push', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Successfully backed up ${data.totalSynced} profiles to MinIO!`, 'success');
+      const lastSyncEl = document.getElementById('cloud-last-sync-text');
+      if (lastSyncEl && data.timestamp) {
+        lastSyncEl.textContent = `Last sync: ${new Date(data.timestamp).toLocaleString()}`;
+      }
+      renderCloudProfilesTable();
+    } else {
+      showToast(data.error || 'Failed to sync profiles to cloud', 'error');
+    }
+  } catch (err) {
+    showToast('Cloud push failed: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function syncPullAll() {
+  const btn = document.getElementById('btn-cloud-pull-all');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Restoring...';
+    btn.disabled = true;
+  }
+
+  try {
+    const res = await fetch('/api/cloud/sync-pull', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Restored ${data.restoredCount} profiles from Cloud!`, 'success');
+      const lastSyncEl = document.getElementById('cloud-last-sync-text');
+      if (lastSyncEl && data.timestamp) {
+        lastSyncEl.textContent = `Last sync: ${new Date(data.timestamp).toLocaleString()}`;
+      }
+      await loadProfiles();
+      renderCloudProfilesTable();
+    } else {
+      showToast(data.error || 'Failed to restore profiles from cloud', 'error');
+    }
+  } catch (err) {
+    showToast('Cloud pull failed: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function syncSingleProfile(id) {
+  try {
+    showToast('Uploading profile to MinIO cloud...', 'info', 2000);
+    const res = await fetch(`/api/cloud/sync-profile/${id}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Profile backed up (${data.sessionSizeKb} KB)`, 'success');
+      renderCloudProfilesTable();
+    } else {
+      showToast(data.error || 'Upload failed', 'error');
+    }
+  } catch (err) {
+    showToast('Sync error: ' + err.message, 'error');
+  }
+}
+
+async function pullSingleProfile(id) {
+  try {
+    showToast('Pulling profile from MinIO cloud...', 'info', 2000);
+    const res = await fetch(`/api/cloud/pull-profile/${id}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Profile restored from cloud', 'success');
+      await loadProfiles();
+      renderCloudProfilesTable();
+    } else {
+      showToast(data.error || 'Pull failed', 'error');
+    }
+  } catch (err) {
+    showToast('Pull error: ' + err.message, 'error');
+  }
+}
+
+function toggleSecretVisibility() {
+  const secretInput = document.getElementById('cloud-secret-key');
+  const eyeIcon = document.getElementById('cloud-secret-eye');
+  if (!secretInput) return;
+
+  if (secretInput.type === 'password') {
+    secretInput.type = 'text';
+    if (eyeIcon) {
+      eyeIcon.classList.remove('fa-eye');
+      eyeIcon.classList.add('fa-eye-slash');
+    }
+  } else {
+    secretInput.type = 'password';
+    if (eyeIcon) {
+      eyeIcon.classList.remove('fa-eye-slash');
+      eyeIcon.classList.add('fa-eye');
+    }
+  }
+}
+
+function renderCloudProfilesTable() {
+  const tbody = document.getElementById('cloud-profiles-tbody');
+  const countEl = document.getElementById('cloud-profiles-count');
+  if (!tbody) return;
+
+  const currentList = profiles || [];
+  if (countEl) countEl.textContent = `${currentList.length} local profile(s) ready`;
+
+  if (currentList.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 24px;">No profiles found locally. Click "Pull All from Cloud" to restore them from your VPS.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = currentList.map(p => {
+    const isRunning = runningProfiles.has(p.id);
+    const proxyDesc = (p.proxy && p.proxy.mode !== 'none' && p.proxy.host) 
+      ? `${p.proxy.mode.toUpperCase()} (${p.proxy.host}:${p.proxy.port})` 
+      : '<span class="text-muted">Direct</span>';
+    const engineName = p.browserEngine || 'orbita';
+
+    return `
+      <tr>
+        <td>
+          <div class="profile-name-cell">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span class="text-xs text-muted">ID: ${p.id.slice(0, 8)}...</span>
+          </div>
+        </td>
+        <td>
+          <span class="badge ${engineName === 'orbita' ? 'badge-primary' : (engineName === 'chrome' ? 'badge-info' : 'badge-warning')}">
+            ${engineName.toUpperCase()}
+          </span>
+        </td>
+        <td>${proxyDesc}</td>
+        <td>
+          <span class="badge ${isRunning ? 'badge-success' : 'badge-secondary'}">
+            ${isRunning ? 'Running' : 'Saved Locally'}
+          </span>
+        </td>
+        <td>
+          <span class="text-xs text-green"><i class="fa-solid fa-circle-check"></i> Cloud Ready</span>
+        </td>
+        <td>
+          <div class="flex-center gap-1">
+            <button class="btn btn-sm btn-secondary" onclick="syncSingleProfile('${p.id}')" title="Upload this profile to MinIO">
+              <i class="fa-solid fa-cloud-arrow-up"></i> Push
+            </button>
+            <button class="btn btn-sm btn-outline" onclick="pullSingleProfile('${p.id}')" title="Download this profile from MinIO">
+              <i class="fa-solid fa-cloud-arrow-down"></i> Pull
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// -------------------------------------------------------------
+// GOLOGIN OFFICIAL PROFILES IMPORTER
+// -------------------------------------------------------------
+let detectedGoLoginProfiles = [];
+let selectedGoLoginIds = new Set();
+let currentCustomScanDir = null;
+
+async function checkGoLoginProfiles(showToastAlert = false, customDir = null) {
+  try {
+    if (customDir !== null) currentCustomScanDir = customDir;
+    let url = '/api/import/gologin/detect';
+    if (currentCustomScanDir) {
+      url += `?customDir=${encodeURIComponent(currentCustomScanDir)}`;
+    }
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.success) {
+      detectedGoLoginProfiles = data.profiles || [];
+      const badge = document.getElementById('gologin-detected-badge');
+      if (badge) badge.textContent = detectedGoLoginProfiles.length;
+
+      const unimported = detectedGoLoginProfiles.filter(p => !p.alreadyImported);
+      if (showToastAlert) {
+        showToast(`Discovered ${detectedGoLoginProfiles.length} GoLogin profiles (${unimported.length} new)`, 'success');
+      }
+      renderGoLoginModal();
+    }
+  } catch (err) {
+    if (showToastAlert) showToast('Failed to scan GoLogin profiles: ' + err.message, 'error');
+  }
+}
+
+async function scanCustomGoLoginPath() {
+  const inputEl = document.getElementById('gologin-custom-path');
+  const pathVal = inputEl ? inputEl.value.trim() : '';
+  if (!pathVal) {
+    showToast('Please enter a folder path to scan', 'info');
+    return;
+  }
+  showToast('Scanning custom path for GoLogin profiles...', 'info', 1500);
+  await checkGoLoginProfiles(true, pathVal);
+}
+
+function openGoLoginImportModal() {
+  openModal('gologin-import-modal');
+  checkGoLoginProfiles(false);
+}
+
+function renderGoLoginModal() {
+  const tbody = document.getElementById('gologin-import-tbody');
+  const countEl = document.getElementById('gologin-modal-count');
+  const statusEl = document.getElementById('gologin-selected-status');
+  if (!tbody) return;
+
+  if (countEl) countEl.textContent = detectedGoLoginProfiles.length;
+
+  if (detectedGoLoginProfiles.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 24px;">No GoLogin profiles detected in this location. Enter a custom folder path above to scan.</td></tr>`;
+    if (statusEl) statusEl.textContent = '0 profiles selected';
+    return;
+  }
+
+  // Pre-select unimported profiles by default
+  selectedGoLoginIds.clear();
+  detectedGoLoginProfiles.forEach(p => {
+    if (!p.alreadyImported) selectedGoLoginIds.add(p.goLoginId);
+  });
+  if (selectedGoLoginIds.size === 0) {
+    detectedGoLoginProfiles.forEach(p => selectedGoLoginIds.add(p.goLoginId));
+  }
+
+  tbody.innerHTML = detectedGoLoginProfiles.map(p => {
+    const isChecked = selectedGoLoginIds.has(p.goLoginId);
+    const cookieBadge = p.cookieSizeKb > 0 
+      ? `<span class="badge badge-success"><i class="fa-solid fa-cookie-bite"></i> ${p.cookieSizeKb} KB</span>`
+      : `<span class="badge badge-secondary">No cookies</span>`;
+    const pwdBadge = p.hasSavedPasswords
+      ? `<span class="badge badge-primary"><i class="fa-solid fa-key"></i> Saved</span>`
+      : `<span class="text-xs text-muted">None</span>`;
+    const statusBadge = p.alreadyImported
+      ? `<span class="badge badge-secondary"><i class="fa-solid fa-check"></i> Already Imported</span>`
+      : `<span class="badge badge-info"><i class="fa-solid fa-sparkles"></i> Ready to Import</span>`;
+
+    return `
+      <tr>
+        <td>
+          <input type="checkbox" class="gologin-check" data-id="${p.goLoginId}" ${isChecked ? 'checked' : ''} onchange="onGoLoginItemToggle('${p.goLoginId}', this.checked)">
+        </td>
+        <td>
+          <div class="profile-name-cell">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span class="text-xs text-muted">ID: ${p.goLoginId.slice(0, 8)}...</span>
+          </div>
+        </td>
+        <td>${cookieBadge}</td>
+        <td>${pwdBadge}</td>
+        <td><span class="text-xs">${p.resolution} · ${p.cpuCores} Cores · ${p.ramGb}GB</span></td>
+        <td>${statusBadge}</td>
+      </tr>
+    `;
+  }).join('');
+
+  updateGoLoginSelectedStatus();
+}
+
+function onGoLoginItemToggle(id, isChecked) {
+  if (isChecked) selectedGoLoginIds.add(id);
+  else selectedGoLoginIds.delete(id);
+  updateGoLoginSelectedStatus();
+}
+
+function toggleSelectAllGoLogin(checked) {
+  selectedGoLoginIds.clear();
+  if (checked) {
+    detectedGoLoginProfiles.forEach(p => selectedGoLoginIds.add(p.goLoginId));
+  }
+  document.querySelectorAll('.gologin-check').forEach(cb => {
+    cb.checked = checked;
+  });
+  updateGoLoginSelectedStatus();
+}
+
+function updateGoLoginSelectedStatus() {
+  const statusEl = document.getElementById('gologin-selected-status');
+  const btn = document.getElementById('btn-execute-gologin-import');
+  const count = selectedGoLoginIds.size;
+  if (statusEl) statusEl.textContent = `${count} of ${detectedGoLoginProfiles.length} selected`;
+  if (btn) btn.disabled = count === 0;
+}
+
+async function executeGoLoginImport() {
+  const btn = document.getElementById('btn-execute-gologin-import');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing sessions...';
+    btn.disabled = true;
+  }
+
+  try {
+    const ids = Array.from(selectedGoLoginIds);
+    const res = await fetch('/api/import/gologin/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        selectedIds: ids,
+        customDir: currentCustomScanDir || null
+      })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Successfully imported ${data.count} profiles with active cookies & passwords!`, 'success', 5000);
+      closeModal('gologin-import-modal');
+      await loadProfiles();
+      renderCloudProfilesTable();
+    } else {
+      showToast(data.error || 'Failed to import profiles', 'error');
+    }
+  } catch (err) {
+    showToast('Import error: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.innerHTML = origHtml;
+      btn.disabled = false;
+    }
+  }
+}
+
 // Global scope bindings for inline action buttons
 window.startSingleProfile = startSingleProfile;
 window.stopSingleProfile = stopSingleProfile;
@@ -1601,6 +2555,21 @@ window.testFirstProfileWithUrl = testFirstProfileWithUrl;
 window.testFirstProfileWithEngine = testFirstProfileWithEngine;
 window.triggerCheckUpdates = triggerCheckUpdates;
 window.downloadEngineUpdate = downloadEngineUpdate;
+window.loadCloudConfig = loadCloudConfig;
+window.saveCloudConfig = saveCloudConfig;
+window.testCloudConnection = testCloudConnection;
+window.syncPushAll = syncPushAll;
+window.syncPullAll = syncPullAll;
+window.syncSingleProfile = syncSingleProfile;
+window.pullSingleProfile = pullSingleProfile;
+window.toggleSecretVisibility = toggleSecretVisibility;
+window.renderCloudProfilesTable = renderCloudProfilesTable;
+window.openGoLoginImportModal = openGoLoginImportModal;
+window.checkGoLoginProfiles = checkGoLoginProfiles;
+window.scanCustomGoLoginPath = scanCustomGoLoginPath;
+window.toggleSelectAllGoLogin = toggleSelectAllGoLogin;
+window.onGoLoginItemToggle = onGoLoginItemToggle;
+window.executeGoLoginImport = executeGoLoginImport;
 
 // Safe Init
 if (document.readyState === 'loading') {

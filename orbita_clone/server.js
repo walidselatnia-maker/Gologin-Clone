@@ -33,6 +33,7 @@ const APPDATA_DIR = resolveAppDataDir();
 const DATA_DIR = path.join(APPDATA_DIR, 'data');
 const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
 const PROFILES_DIR = path.join(DATA_DIR, 'profiles_data');
+const FOLDERS_FILE = path.join(DATA_DIR, 'folders.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(PROFILES_DIR)) fs.mkdirSync(PROFILES_DIR, { recursive: true });
@@ -78,6 +79,10 @@ function autoRecoverLegacyData() {
 }
 
 autoRecoverLegacyData();
+
+// Cloud Storage Sync Manager (MinIO / S3 self-hosted VPS storage)
+const CloudSyncManager = require('./cloudSync');
+const cloudSync = new CloudSyncManager(DATA_DIR, PROFILES_FILE, PROFILES_DIR);
 
 // Running browser processes map: profileId -> { proc, startTime, anonymizedUrl }
 const RUNNING_PROCESSES = new Map();
@@ -364,6 +369,23 @@ function readProfiles() {
 
 function saveProfiles(profiles) {
   fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+}
+
+// -------------------------------------------------------------
+// Folder Storage & Organization
+// -------------------------------------------------------------
+function readFolders() {
+  try {
+    if (fs.existsSync(FOLDERS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf8'));
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveFolders(folders) {
+  fs.writeFileSync(FOLDERS_FILE, JSON.stringify(folders, null, 2), 'utf8');
 }
 
 // Engine Detection
@@ -679,6 +701,119 @@ app.get('/api/generate-fingerprint', (req, res) => {
   res.json(generateFingerprint(os));
 });
 
+// -------------------------------------------------------------
+// Folder Endpoints (GoLogin-style Grouping & Organization)
+// -------------------------------------------------------------
+
+// List all folders with live profile counts
+app.get('/api/folders', (req, res) => {
+  try {
+    const folders = readFolders();
+    const profiles = readProfiles();
+    const foldersWithCounts = folders.map(f => ({
+      ...f,
+      count: profiles.filter(p => p.folder === f.id).length
+    }));
+    const unorganizedCount = profiles.filter(p => !p.folder).length;
+    res.json({
+      folders: foldersWithCounts,
+      totalProfiles: profiles.length,
+      unorganizedCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create Folder
+app.post('/api/folders', (req, res) => {
+  try {
+    const { name, color, icon } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Folder name is required' });
+
+    const folders = readFolders();
+    const newFolder = {
+      id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim(),
+      color: color || '#00b86d',
+      icon: icon || 'folder',
+      createdAt: new Date().toISOString()
+    };
+    folders.push(newFolder);
+    saveFolders(folders);
+    res.json({ success: true, folder: newFolder });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update / Rename Folder
+app.put('/api/folders/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const { name, color, icon } = req.body;
+    const folders = readFolders();
+    const idx = folders.findIndex(f => f.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Folder not found' });
+
+    if (name && name.trim()) folders[idx].name = name.trim();
+    if (color) folders[idx].color = color;
+    if (icon) folders[idx].icon = icon;
+
+    saveFolders(folders);
+    res.json({ success: true, folder: folders[idx] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete Folder (Profiles are safely kept and moved to unorganized)
+app.delete('/api/folders/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    let folders = readFolders();
+    folders = folders.filter(f => f.id !== id);
+    saveFolders(folders);
+
+    const profiles = readProfiles();
+    let modified = false;
+    for (const p of profiles) {
+      if (p.folder === id) {
+        p.folder = null;
+        modified = true;
+      }
+    }
+    if (modified) saveProfiles(profiles);
+
+    res.json({ success: true, message: 'Folder deleted, profiles moved to unorganized' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Move Profiles to Folder
+app.post('/api/profiles/move-folder', (req, res) => {
+  try {
+    const { profileIds, folderId } = req.body;
+    if (!Array.isArray(profileIds) || profileIds.length === 0) {
+      return res.status(400).json({ error: 'profileIds array is required' });
+    }
+
+    const profiles = readProfiles();
+    let count = 0;
+    for (const p of profiles) {
+      if (profileIds.includes(p.id)) {
+        p.folder = folderId || null;
+        count++;
+      }
+    }
+    saveProfiles(profiles);
+    res.json({ success: true, movedCount: count, folderId: folderId || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // List Profiles
 app.get('/api/profiles', (req, res) => {
   const profiles = readProfiles();
@@ -698,6 +833,7 @@ app.post('/api/profiles', (req, res) => {
   const newProfile = {
     id,
     name: req.body.name || `Profile ${profiles.length + 1}`,
+    folder: req.body.folder || null,
     tags: Array.isArray(req.body.tags) ? req.body.tags : [],
     notes: req.body.notes || '',
     engine: req.body.engine || 'orbita',
@@ -723,6 +859,7 @@ app.post('/api/profiles/bulk-create', (req, res) => {
   const baseName = (req.body.baseName || 'Profile').trim();
   const targetOs = req.body.os || 'Windows 11';
   const engine = req.body.engine || 'orbita';
+  const targetFolder = req.body.folder || null;
   const tags = Array.isArray(req.body.tags) ? req.body.tags : [];
   const proxiesList = req.body.proxiesList || []; // Array of { host, port, username, password, mode }
 
@@ -742,6 +879,7 @@ app.post('/api/profiles/bulk-create', (req, res) => {
     const p = {
       id,
       name,
+      folder: targetFolder,
       tags: [...tags],
       notes: `Bulk created on ${new Date().toLocaleDateString()}`,
       engine,
@@ -853,6 +991,9 @@ app.post('/api/profiles/bulk-update', (req, res) => {
         updatedCount++;
       } else if (action === 'set_engine') {
         p.engine = data.engine;
+        updatedCount++;
+      } else if (action === 'move_folder') {
+        p.folder = data.folderId || null;
         updatedCount++;
       }
     }
@@ -1143,13 +1284,34 @@ app.post('/api/profiles/:id/start', async (req, res) => {
   }
 
   try {
+    // Cloud sync auto-pull before launch (restores newest session/cookies)
+    if (cloudSync && cloudSync.config && cloudSync.config.enabled && cloudSync.config.autoSyncOnLaunch) {
+      try {
+        console.log(`[CloudSync] Auto-pulling profile ${id} before start...`);
+        await cloudSync.downloadProfile(id);
+      } catch (syncErr) {
+        console.warn(`[CloudSync] Auto-pull skipped/failed for ${id}:`, syncErr.message);
+      }
+    }
+
     const { proc, engine } = await launchBrowserProcess(profile, req.body.url);
     RUNNING_PROCESSES.set(id, { proc, startTime: Date.now() });
 
-    proc.on('exit', () => {
+    proc.on('exit', async () => {
       console.log(`Profile ${id} closed.`);
       RUNNING_PROCESSES.delete(id);
       cleanupProxyForProfile(id);
+
+      // Cloud sync auto-upload on close (backs up session/cookies to MinIO/S3)
+      if (cloudSync && cloudSync.config && cloudSync.config.enabled && cloudSync.config.autoSyncOnClose) {
+        try {
+          console.log(`[CloudSync] Auto-uploading profile ${id} to MinIO/S3...`);
+          const syncRes = await cloudSync.uploadProfile(id);
+          console.log(`[CloudSync] Profile ${id} uploaded (${syncRes.sessionSizeKb} KB)`);
+        } catch (syncErr) {
+          console.error(`[CloudSync] Auto-upload failed for ${id}:`, syncErr.message);
+        }
+      }
     });
 
     profile.lastLaunched = new Date().toISOString();
@@ -1503,6 +1665,155 @@ app.post('/api/updates/download', async (req, res) => {
         DOWNLOAD_PROGRESS = { engine: 'chrome', percent: 0, status: 'error', message: err.message };
       }
     })();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Cloud Sync Endpoints (MinIO / S3 Self-Hosted VPS Storage)
+// -----------------------------------------------------------------------------
+
+// Get Cloud Config (Secret masked for security)
+app.get('/api/cloud/config', (req, res) => {
+  const cfg = cloudSync.config || {};
+  res.json({
+    enabled: Boolean(cfg.enabled),
+    provider: cfg.provider || 'minio',
+    endpoint: cfg.endpoint || '',
+    region: cfg.region || 'us-east-1',
+    bucket: cfg.bucket || 'orbita-profiles',
+    accessKey: cfg.accessKey || '',
+    secretKey: cfg.secretKey ? '••••••••••••' : '',
+    hasSecretKey: Boolean(cfg.secretKey),
+    autoSyncOnLaunch: cfg.autoSyncOnLaunch !== false,
+    autoSyncOnClose: cfg.autoSyncOnClose !== false,
+    lastSync: cfg.lastSync || null
+  });
+});
+
+// Save Cloud Config
+app.post('/api/cloud/config', (req, res) => {
+  try {
+    const { enabled, provider, endpoint, region, bucket, accessKey, secretKey, autoSyncOnLaunch, autoSyncOnClose } = req.body;
+    const current = cloudSync.config;
+    
+    // Only update secretKey if a real new key is provided (not mask)
+    let finalSecretKey = current.secretKey;
+    if (secretKey && !secretKey.includes('•')) {
+      finalSecretKey = secretKey.trim();
+    }
+
+    const updated = cloudSync.saveConfig({
+      enabled: Boolean(enabled),
+      provider: provider || 'minio',
+      endpoint: endpoint ? endpoint.trim() : '',
+      region: region ? region.trim() : 'us-east-1',
+      bucket: bucket ? bucket.trim() : 'orbita-profiles',
+      accessKey: accessKey ? accessKey.trim() : '',
+      secretKey: finalSecretKey,
+      autoSyncOnLaunch: Boolean(autoSyncOnLaunch),
+      autoSyncOnClose: Boolean(autoSyncOnClose)
+    });
+
+    res.json({
+      success: true,
+      message: 'Cloud configuration saved successfully',
+      config: {
+        ...updated,
+        secretKey: updated.secretKey ? '••••••••••••' : '',
+        hasSecretKey: Boolean(updated.secretKey)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Test Cloud Connection
+app.post('/api/cloud/test', async (req, res) => {
+  try {
+    const override = req.body && Object.keys(req.body).length > 0 ? req.body : null;
+    if (override && override.secretKey && override.secretKey.includes('•')) {
+      override.secretKey = cloudSync.config.secretKey;
+    }
+    const result = await cloudSync.testConnection(override);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Push All Profiles to Cloud
+app.post('/api/cloud/sync-push', async (req, res) => {
+  try {
+    const result = await cloudSync.syncAllToCloud();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Pull All Profiles from Cloud
+app.post('/api/cloud/sync-pull', async (req, res) => {
+  try {
+    const result = await cloudSync.syncAllFromCloud();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Sync Single Profile to Cloud
+app.post('/api/cloud/sync-profile/:id', async (req, res) => {
+  try {
+    const result = await cloudSync.uploadProfile(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Download Single Profile from Cloud
+app.post('/api/cloud/pull-profile/:id', async (req, res) => {
+  try {
+    const result = await cloudSync.downloadProfile(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Official GoLogin Local Profile Importer (No Paid Plan Required)
+// -----------------------------------------------------------------------------
+const gologinImporter = require('./gologinImporter');
+
+// Detect all official GoLogin profiles stored locally on system
+app.get('/api/import/gologin/detect', (req, res) => {
+  try {
+    const current = readProfiles();
+    const customDir = req.query.customDir || null;
+    const detected = gologinImporter.detectGoLoginProfiles(current, customDir);
+    res.json({ success: true, count: detected.length, profiles: detected });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Import selected GoLogin profiles into Orbita
+app.post('/api/import/gologin/execute', (req, res) => {
+  try {
+    const { selectedIds, customDir } = req.body || {};
+    const result = gologinImporter.importGoLoginProfiles({
+      selectedIds: Array.isArray(selectedIds) ? selectedIds : [],
+      customDir: customDir || null,
+      PROFILES_FILE,
+      PROFILES_DIR,
+      readProfilesFn: readProfiles,
+      saveProfilesFn: saveProfiles
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
