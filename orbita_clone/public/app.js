@@ -60,13 +60,172 @@ function copyToClipboard(text, label = 'Text') {
 }
 
 // -------------------------------------------------------------
+// THEME MANAGEMENT (Light & Dark Modes)
+// -------------------------------------------------------------
+function initTheme() {
+  const savedTheme = localStorage.getItem('orbita_theme') || 'dark';
+  applyTheme(savedTheme, false);
+}
+
+function applyTheme(theme, showFeedback = true) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('orbita_theme', theme);
+  
+  const icon = document.getElementById('theme-icon');
+  const toggleBtn = document.getElementById('btn-theme-toggle');
+  
+  if (theme === 'light') {
+    if (icon) {
+      icon.className = 'fa-solid fa-moon';
+    }
+    if (toggleBtn) {
+      toggleBtn.title = 'Switch to Dark Mode';
+    }
+    if (showFeedback) {
+      showToast('Switched to Light Mode', 'info', 2000);
+    }
+  } else {
+    if (icon) {
+      icon.className = 'fa-solid fa-sun';
+    }
+    if (toggleBtn) {
+      toggleBtn.title = 'Switch to Light Mode';
+    }
+    if (showFeedback) {
+      showToast('Switched to Dark Mode', 'info', 2000);
+    }
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  applyTheme(next, true);
+}
+
+// -------------------------------------------------------------
+// COLUMN RESIZING & SCALING (Interactive draggable headers)
+// -------------------------------------------------------------
+const DEFAULT_COLUMN_WIDTHS = {
+  action: 105,
+  profile: 240,
+  tags: 130,
+  proxy: 175,
+  engine: 115,
+  'last-active': 110,
+  manage: 140
+};
+
+const MIN_COLUMN_WIDTHS = {
+  action: 80,
+  profile: 140,
+  tags: 80,
+  proxy: 110,
+  engine: 85,
+  'last-active': 80,
+  manage: 100
+};
+
+function getSavedColumnWidths() {
+  try {
+    const raw = localStorage.getItem('orbita_col_widths');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { ...DEFAULT_COLUMN_WIDTHS };
+}
+
+function saveColumnWidths(widths) {
+  try {
+    localStorage.setItem('orbita_col_widths', JSON.stringify(widths));
+  } catch (e) {}
+}
+
+function applyColumnWidth(colKey, width) {
+  const th = document.querySelector(`th[data-col="${colKey}"]`);
+  if (!th) return;
+  th.style.width = width + 'px';
+  th.style.minWidth = width + 'px';
+}
+
+function applySavedColumnWidths() {
+  const widths = getSavedColumnWidths();
+  for (const [col, w] of Object.entries(widths)) {
+    applyColumnWidth(col, w);
+  }
+}
+
+function initResizableColumns() {
+  applySavedColumnWidths();
+
+  const resizers = document.querySelectorAll('.data-table th .col-resizer');
+  resizers.forEach(resizer => {
+    if (resizer.dataset.resizableBound === 'true') return;
+    resizer.dataset.resizableBound = 'true';
+
+    const th = resizer.closest('th');
+    if (!th) return;
+    const colKey = th.getAttribute('data-col');
+    if (!colKey) return;
+
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMouseMove = (e) => {
+      const deltaX = e.pageX - startX;
+      const minW = MIN_COLUMN_WIDTHS[colKey] || 70;
+      const newWidth = Math.max(minW, Math.round(startWidth + deltaX));
+      
+      th.style.width = newWidth + 'px';
+      th.style.minWidth = newWidth + 'px';
+    };
+
+    const onMouseUp = () => {
+      resizer.classList.remove('resizing');
+      document.body.classList.remove('resizing-columns');
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      const widths = getSavedColumnWidths();
+      widths[colKey] = parseInt(th.style.width, 10) || th.offsetWidth;
+      saveColumnWidths(widths);
+    };
+
+    resizer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startX = e.pageX;
+      startWidth = th.offsetWidth;
+      resizer.classList.add('resizing');
+      document.body.classList.add('resizing-columns');
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+
+    resizer.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const defW = DEFAULT_COLUMN_WIDTHS[colKey] || 120;
+      th.style.width = defW + 'px';
+      th.style.minWidth = defW + 'px';
+      const widths = getSavedColumnWidths();
+      widths[colKey] = defW;
+      saveColumnWidths(widths);
+      showToast(`Column "${colKey}" reset to default width (${defW}px)`, 'info', 1800);
+    });
+  });
+}
+
+// -------------------------------------------------------------
 // INITIALIZATION
 // -------------------------------------------------------------
 async function init() {
   console.log('Initializing Orbita Anti-Detect UI...');
+  initTheme();
   setupModalDismissals();
   setupFolderColorPicker();
   setupEventListeners();
+  initResizableColumns();
   
   await loadSystemInfo();
   await loadFolders();
@@ -2237,17 +2396,26 @@ async function syncPushAll() {
     const data = await res.json();
 
     if (data.success) {
-      showToast(`Successfully backed up ${data.totalSynced} profiles to MinIO!`, 'success');
+      if (data.totalSynced === 0 && Array.isArray(data.details) && data.details.length > 0) {
+        const firstFail = data.details.find(d => !d.success);
+        showToast(`Sync completed: 0 profiles synced${firstFail ? ' (' + firstFail.error + ')' : ''}`, 'warning', 4500);
+      } else {
+        showToast(`Successfully backed up ${data.totalSynced} profile(s) to MinIO!`, 'success');
+      }
       const lastSyncEl = document.getElementById('cloud-last-sync-text');
       if (lastSyncEl && data.timestamp) {
         lastSyncEl.textContent = `Last sync: ${new Date(data.timestamp).toLocaleString()}`;
       }
-      renderCloudProfilesTable();
+      try {
+        renderCloudProfilesTable();
+      } catch (tableErr) {
+        console.warn('Notice: Error refreshing cloud profiles table:', tableErr);
+      }
     } else {
       showToast(data.error || 'Failed to sync profiles to cloud', 'error');
     }
   } catch (err) {
-    showToast('Cloud push failed: ' + err.message, 'error');
+    showToast('Cloud push failed: ' + (err?.message || 'Network request failed'), 'error');
   } finally {
     if (btn) {
       btn.innerHTML = origHtml;
@@ -2347,7 +2515,9 @@ function renderCloudProfilesTable() {
   const countEl = document.getElementById('cloud-profiles-count');
   if (!tbody) return;
 
-  const currentList = profiles || [];
+  const currentList = (typeof profiles !== 'undefined' && Array.isArray(profiles)) 
+    ? profiles 
+    : ((typeof allProfiles !== 'undefined' && Array.isArray(allProfiles)) ? allProfiles : []);
   if (countEl) countEl.textContent = `${currentList.length} local profile(s) ready`;
 
   if (currentList.length === 0) {
@@ -2356,18 +2526,19 @@ function renderCloudProfilesTable() {
   }
 
   tbody.innerHTML = currentList.map(p => {
+    if (!p) return '';
     const isRunning = Boolean(p.isRunning);
     const proxyDesc = (p.proxy && p.proxy.mode !== 'none' && p.proxy.host) 
       ? `${p.proxy.mode.toUpperCase()} (${p.proxy.host}:${p.proxy.port})` 
       : '<span class="text-muted">Direct</span>';
-    const engineName = p.browserEngine || 'orbita';
+    const engineName = p.browserEngine || p.engine || 'orbita';
 
     return `
       <tr>
         <td>
           <div class="profile-name-cell">
-            <strong>${escapeHtml(p.name)}</strong>
-            <span class="text-xs text-muted">ID: ${p.id.slice(0, 8)}...</span>
+            <strong>${escapeHtml(p.name || 'Unnamed')}</strong>
+            <span class="text-xs text-muted">ID: ${(p.id || '').slice(0, 8)}...</span>
           </div>
         </td>
         <td>
@@ -2386,10 +2557,10 @@ function renderCloudProfilesTable() {
         </td>
         <td>
           <div class="flex-center gap-1">
-            <button class="btn btn-sm btn-secondary" onclick="syncSingleProfile('${p.id}')" title="Upload this profile to MinIO">
+            <button class="btn btn-sm btn-secondary" onclick="syncSingleProfile('${escapeHtml(p.id)}')" title="Upload this profile to MinIO">
               <i class="fa-solid fa-cloud-arrow-up"></i> Push
             </button>
-            <button class="btn btn-sm btn-outline" onclick="pullSingleProfile('${p.id}')" title="Download this profile from MinIO">
+            <button class="btn btn-sm btn-outline" onclick="pullSingleProfile('${escapeHtml(p.id)}')" title="Download this profile from MinIO">
               <i class="fa-solid fa-cloud-arrow-down"></i> Pull
             </button>
           </div>

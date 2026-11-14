@@ -7,20 +7,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap');
 
 :root {
-  /* Surface Layers */
-  --bg-base: #0a0c10;
-  --bg-sidebar: #0e1117;
-  --bg-surface: #121620;
-  --bg-surface-elevated: #171c28;
-  --bg-card: #171c28;
-  --bg-card-hover: #1d2333;
-  --bg-input: #0c0f16;
-  --bg-input-focus: #10141f;
+  /* Surface Layers - Softer Modern Dark Mode (Reduced contrast slate/charcoal) */
+  --bg-base: #14171f;
+  --bg-sidebar: #191d27;
+  --bg-surface: #1e232f;
+  --bg-surface-elevated: #242a38;
+  --bg-card: #1e232f;
+  --bg-card-hover: #262d3c;
+  --bg-input: #171b24;
+  --bg-input-focus: #1c212d;
 
   /* Borders & Dividers */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-light: rgba(255, 255, 255, 0.10);
-  --border-card: #202636;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-light: rgba(255, 255, 255, 0.14);
+  --border-card: #2b3342;
   --border-focus: #10b981;
 
   /* Brand Accents */
@@ -38,10 +38,10 @@
   --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  --text-main: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-disabled: #475569;
+  --text-main: #e8edf2;
+  --text-secondary: #9ba7b6;
+  --text-muted: #6e7d90;
+  --text-disabled: #4e5a6b;
   --text-inverse: #05080f;
 
   /* Functional Status */
@@ -63,9 +63,9 @@
   --radius-pill: 9999px;
 
   /* Depth & Elevation */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.65);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px rgba(16, 185, 129, 0.25);
 
   /* Layout Constants */
@@ -74,6 +74,61 @@
   --toolbar-height: 52px;
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================================================
+   LIGHT MODE THEME ([data-theme="light"])
+   Clean, modern, high-contrast, eye-friendly daylight workspace palette
+   ========================================================================== */
+[data-theme="light"] {
+  /* Surface Layers */
+  --bg-base: #f4f6f9;
+  --bg-sidebar: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-input: #f8fafc;
+  --bg-input-focus: #ffffff;
+
+  /* Borders & Dividers */
+  --border-subtle: #e2e8f0;
+  --border-light: #cbd5e1;
+  --border-card: #e2e8f0;
+  --border-focus: #059669;
+
+  /* Brand Accents */
+  --brand-primary: #059669;
+  --brand-primary-hover: #047857;
+  --brand-primary-active: #065f46;
+  --brand-primary-soft: rgba(5, 150, 105, 0.10);
+  --brand-primary-glow: rgba(5, 150, 105, 0.22);
+  --brand-cyan: #0891b2;
+  --brand-blue: #2563eb;
+  --brand-purple: #7c3aed;
+
+  /* Typography */
+  --text-main: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-disabled: #94a3b8;
+  --text-inverse: #ffffff;
+
+  /* Functional Status */
+  --status-online: #059669;
+  --status-online-bg: rgba(5, 150, 105, 0.12);
+  --status-error: #e11d48;
+  --status-error-bg: rgba(225, 29, 72, 0.10);
+  --status-warn: #d97706;
+  --status-warn-bg: rgba(217, 119, 6, 0.12);
+  --status-info: #2563eb;
+  --status-info-bg: rgba(37, 99, 235, 0.10);
+
+  /* Depth & Elevation */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 16px rgba(5, 150, 105, 0.18);
 }
 
 /* ==========================================================================
@@ -283,9 +338,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .nav-folder-item.active {
   background-color: var(--bg-surface-elevated);
-  color: #ffffff;
+  color: var(--text-main);
   border-color: var(--border-light);
   box-shadow: var(--shadow-sm);
+  font-weight: 600;
 }
 
 .nav-folder-item.active::before {
@@ -381,9 +437,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .nav-item.active {
   background-color: var(--bg-surface-elevated);
-  color: #ffffff;
+  color: var(--text-main);
   border-color: var(--border-light);
   box-shadow: var(--shadow-sm);
+  font-weight: 600;
 }
 
 .nav-item.active i {
@@ -685,6 +742,22 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   padding: 0;
 }
 
+#btn-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-main);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+#btn-theme-toggle:hover {
+  color: var(--brand-primary);
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 8px var(--brand-primary-glow);
+}
+
 .btn-sm.btn-icon {
   width: 30px;
 }
@@ -711,8 +784,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .btn-secondary:hover {
   background-color: var(--bg-card-hover);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
+  border-color: var(--border-light);
+  color: var(--text-main);
 }
 
 /* Outline Button */
@@ -837,7 +910,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .filter-chip.active {
   background-color: var(--bg-surface-elevated);
   border-color: var(--border-light);
-  color: #ffffff;
+  color: var(--text-main);
   font-weight: 600;
 }
 
@@ -943,6 +1016,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   border-collapse: collapse;
   text-align: left;
   font-size: 13px;
+  table-layout: fixed; /* Strict column width allocation for manual resize scaling */
 }
 
 .data-table thead, .table thead {
@@ -954,6 +1028,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .data-table th, .table th {
+  position: relative;
   padding: 10px 14px;
   font-size: 11px;
   font-weight: 600;
@@ -961,6 +1036,57 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   text-transform: uppercase;
   color: var(--text-muted);
   white-space: nowrap;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Draggable Table Column Resizers (Dividers) */
+.data-table th .col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-fast);
+}
+
+.data-table th .col-resizer::after {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 55%;
+  background: var(--border-light);
+  border-radius: 1px;
+  opacity: 0.6;
+  transition: all var(--transition-fast);
+}
+
+.data-table th .col-resizer:hover,
+.data-table th .col-resizer.resizing {
+  background: rgba(16, 185, 129, 0.10);
+}
+
+.data-table th .col-resizer:hover::after,
+.data-table th .col-resizer.resizing::after {
+  width: 3px;
+  height: 90%;
+  background: var(--brand-primary);
+  opacity: 1;
+  box-shadow: 0 0 6px var(--brand-primary-glow);
+}
+
+/* Global state while dragging column widths */
+body.resizing-columns,
+body.resizing-columns * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .data-table tbody tr, .table tbody tr {
@@ -969,13 +1095,20 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .data-table tbody tr:hover, .table tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.025);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="light"] .data-table tbody tr:hover,
+[data-theme="light"] .table tbody tr:hover {
+  background-color: rgba(0, 0, 0, 0.035);
 }
 
 .data-table td, .table td {
   padding: 10px 14px;
   vertical-align: middle;
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Table Quick Action: Start / Stop Button */

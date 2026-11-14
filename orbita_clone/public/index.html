@@ -116,6 +116,9 @@
         </div>
 
         <div class="topbar-right">
+          <button class="btn btn-icon btn-secondary" id="btn-theme-toggle" title="Toggle Light / Dark Mode" onclick="toggleTheme()">
+            <i class="fa-solid fa-sun" id="theme-icon"></i>
+          </button>
           <button class="btn btn-warning update-pill hidden" id="topbar-update-alert" onclick="switchView('engines')">
             <i class="fa-solid fa-cloud-arrow-down"></i> Updates Available (<span id="updates-count-badge">0</span>)
           </button>
@@ -220,19 +223,40 @@
         <!-- Table Body -->
         <div class="content-body">
           <div class="table-container" id="profiles-table-container">
-            <table class="data-table">
+            <table class="data-table" id="profiles-data-table">
               <thead>
                 <tr>
                   <th class="col-checkbox text-center" style="width: 44px; min-width: 44px;">
                     <input type="checkbox" id="select-all-checkbox">
                   </th>
-                  <th class="col-quick-action" style="width: 105px; min-width: 105px;">Action</th>
-                  <th class="col-profile" style="min-width: 190px;">Profile</th>
-                  <th class="col-tags" style="min-width: 110px;">Tags</th>
-                  <th class="col-proxy" style="min-width: 160px;">Proxy &amp; Latency</th>
-                  <th class="col-engine" style="width: 110px; min-width: 110px;">Engine</th>
-                  <th class="col-last-active" style="width: 100px; min-width: 100px;">Last Active</th>
-                  <th class="col-actions text-right" style="width: 130px; min-width: 130px;">Manage</th>
+                  <th class="col-quick-action" data-col="action" style="width: 105px;">
+                    <span>Action</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-profile" data-col="profile" style="min-width: 200px;">
+                    <span>Profile</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-tags" data-col="tags" style="width: 120px;">
+                    <span>Tags</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-proxy" data-col="proxy" style="width: 170px;">
+                    <span>Proxy &amp; Latency</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-engine" data-col="engine" style="width: 110px;">
+                    <span>Engine</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-last-active" data-col="last-active" style="width: 110px;">
+                    <span>Last Active</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
+                  <th class="col-actions text-right" data-col="manage" style="width: 130px;">
+                    <span>Manage</span>
+                    <div class="col-resizer" title="Drag to resize column (double-click to reset)"></div>
+                  </th>
                 </tr>
               </thead>
               <tbody id="profiles-table-body">
