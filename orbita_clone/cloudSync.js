@@ -40,7 +40,7 @@ class CloudSyncManager {
       bucket: 'orbita-profiles',
       accessKey: '',
       secretKey: '',
-      autoSyncOnLaunch: true,
+      autoSyncOnLaunch: false,
       autoSyncOnClose: true,
       lastSync: null
     };

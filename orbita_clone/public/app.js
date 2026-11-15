@@ -2452,7 +2452,7 @@ async function loadCloudConfig() {
     if (bucketInput) bucketInput.value = cfg.bucket || 'orbita-profiles';
     if (accessKeyInput) accessKeyInput.value = cfg.accessKey || '';
     if (secretKeyInput) secretKeyInput.value = cfg.secretKey || '';
-    if (autoPullToggle) autoPullToggle.checked = cfg.autoSyncOnLaunch !== false;
+    if (autoPullToggle) autoPullToggle.checked = Boolean(cfg.autoSyncOnLaunch);
     if (autoPushToggle) autoPushToggle.checked = cfg.autoSyncOnClose !== false;
 
     if (lastSyncEl) {

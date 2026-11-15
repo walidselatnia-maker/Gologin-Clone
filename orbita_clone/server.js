@@ -1284,13 +1284,20 @@ app.post('/api/profiles/:id/start', async (req, res) => {
   }
 
   try {
-    // Cloud sync auto-pull before launch (restores newest session/cookies)
-    if (cloudSync && cloudSync.config && cloudSync.config.enabled && cloudSync.config.autoSyncOnLaunch) {
+    // Cloud sync auto-pull: ONLY download from cloud if profile session is missing locally
+    // Never block local launches when profile data is already on disk (preserves instant launch speed)
+    const profileDir = path.join(PROFILES_DIR, id);
+    let hasLocalData = false;
+    try {
+      hasLocalData = fs.existsSync(profileDir) && fs.readdirSync(profileDir).length > 0;
+    } catch (e) {}
+
+    if (!hasLocalData && cloudSync && cloudSync.config && cloudSync.config.enabled && cloudSync.config.autoSyncOnLaunch) {
       try {
-        console.log(`[CloudSync] Auto-pulling profile ${id} before start...`);
+        console.log(`[CloudSync] Local profile data missing for '${profile.name}' (${id}). Pulling from cloud...`);
         await cloudSync.downloadProfile(id);
       } catch (syncErr) {
-        console.warn(`[CloudSync] Auto-pull skipped/failed for ${id}:`, syncErr.message);
+        console.warn(`[CloudSync] Cloud pull failed for missing profile ${id}:`, syncErr.message);
       }
     }
 
